@@ -5,7 +5,9 @@
  */
 
 import Command from '../../structures/Command.js';
+import { ContainerBuilder, TextDisplayBuilder, MessageFlags } from 'discord.js';
 import { savePlayerState } from '../../managers/LavalinkHandler.js';
+import emojis from '../../emojis.js';
 
 export default class Shuffle extends Command {
     constructor(client, file) {
@@ -32,54 +34,61 @@ export default class Shuffle extends Command {
         this.file = file;
     }
 
+    _buildContainer(title, message) {
+        const container = new ContainerBuilder();
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`### ${title}\n${message}`)
+        );
+        return container;
+    }
+
     async run(ctx, args) {
-        // Check if user is in a voice channel
         const member = ctx.member;
         const voiceChannel = member.voice?.channel;
 
         if (!voiceChannel) {
             return ctx.sendMessage({
-                content: `\`❌\` You need to be in a voice channel!`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'You need to be in a voice channel!')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
-        // Get player
         const player = this.client.lavalink?.players.get(ctx.guild.id);
 
         if (!player) {
             return ctx.sendMessage({
-                content: `\`❌\` Nothing is playing right now!`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'Nothing is playing right now!')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
-        // Check if user is in the same voice channel
         if (player.voiceChannelId !== voiceChannel.id) {
             return ctx.sendMessage({
-                content: `\`❌\` You need to be in the same voice channel as me!`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'You need to be in the same voice channel as me!')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
-        // Check if queue has tracks to shuffle
         if (player.queue.tracks.length < 2) {
             return ctx.sendMessage({
-                content: `\`❌\` Need at least 2 tracks in the queue to shuffle!`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'Need at least 2 tracks in the queue to shuffle!')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
         try {
-            // Shuffle the queue
             await player.queue.shuffle();
-
-            // Save player state
             await savePlayerState(player, this.client);
 
             return ctx.sendMessage({
-                content: `\`🔀\` Shuffled **${player.queue.tracks.length}** tracks in the queue!`,
+                components: [this._buildContainer(`${emojis.player.shuffle} Shuffled`, `Shuffled **${player.queue.tracks.length}** tracks in the queue!`)],
+                flags: MessageFlags.IsComponentsV2
             });
         } catch (error) {
             this.client.logger.error(`[Shuffle] Error: ${error.message}`);
             return ctx.sendMessage({
-                content: `\`❌\` Failed to shuffle: ${error.message}`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, `Failed to shuffle: ${error.message}`)],
+                flags: MessageFlags.IsComponentsV2
             });
         }
     }

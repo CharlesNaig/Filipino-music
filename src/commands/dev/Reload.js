@@ -1,4 +1,6 @@
 import Command from '../../structures/Command.js';
+import { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, MessageFlags } from 'discord.js';
+import emojis from '../../emojis.js';
 
 export default class Reload extends Command {
     constructor(client) {
@@ -21,6 +23,14 @@ export default class Reload extends Command {
             slashCommand: false,
         });
     }
+
+    _buildContainer(title, message) {
+        const container = new ContainerBuilder();
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`### ${title}\n${message}`)
+        );
+        return container;
+    }
     
     async run(ctx, args) {
         const commandName = args[0].toLowerCase();
@@ -28,7 +38,10 @@ export default class Reload extends Command {
                        this.client.commands.get(this.client.aliases.get(commandName));
         
         if (!command) {
-            return ctx.sendMessage({ content: `❌ Command \`${commandName}\` not found.` });
+            return ctx.sendMessage({ 
+                components: [this._buildContainer(`${emojis.status.error} Error`, `Command \`${commandName}\` not found.`)],
+                flags: MessageFlags.IsComponentsV2
+            });
         }
         
         try {
@@ -51,20 +64,24 @@ export default class Reload extends Command {
                 });
             }
             
-            const embed = this.client.embed()
-                .setColor(this.client.color.success)
-                .setDescription(`✅ Successfully reloaded command: \`${newCommand.name}\``)
-                .setTimestamp();
-                
-            return ctx.sendMessage({ embeds: [embed] });
+            return ctx.sendMessage({ 
+                components: [this._buildContainer(`${emojis.status.success} Reloaded`, `Successfully reloaded command: \`${newCommand.name}\``)],
+                flags: MessageFlags.IsComponentsV2
+            });
         } catch (error) {
             console.error(error);
-            const embed = this.client.embed()
-                .setColor(this.client.color.error)
-                .setDescription(`❌ Error reloading command: \`${commandName}\`\n\`\`\`js\n${error.message}\n\`\`\``)
-                .setTimestamp();
-                
-            return ctx.sendMessage({ embeds: [embed] });
+            const container = new ContainerBuilder();
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(`### ${emojis.status.error} Error`)
+            );
+            container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(`Error reloading command: \`${commandName}\`\n\`\`\`js\n${error.message}\n\`\`\``)
+            );
+            return ctx.sendMessage({ 
+                components: [container],
+                flags: MessageFlags.IsComponentsV2
+            });
         }
     }
 }

@@ -28,11 +28,13 @@
   "bugs": "",
   "homepage": "",
   "dependencies": {
+    "@napi-rs/canvas": "^0.1.84",
     "discord.js": "^14.25.1",
     "dotenv": "^17.2.3",
     "lavalink-client": "^2.7.0",
     "mongoose": "^8.20.1",
-    "signale": "^1.4.0"
+    "signale": "^1.4.0",
+    "undici": "^6.22.0"
   },
   "engines": {
     "node": ">=18"

@@ -6,10 +6,11 @@
  */
 
 import Command from '../../structures/Command.js';
-import { EmbedBuilder } from 'discord.js';
+import { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, MessageFlags } from 'discord.js';
 import BotStatus from '../../schemas/BotStatus.js';
 import GuildAssignment from '../../schemas/GuildAssignment.js';
 import PlayerSchema from '../../schemas/Player.js';
+import emojis from '../../emojis.js';
 
 export default class ClusterStats extends Command {
     constructor(client, file) {
@@ -37,7 +38,7 @@ export default class ClusterStats extends Command {
     }
 
     async run(ctx, args) {
-        await ctx.sendDeferMessage({ content: `\`⏳\` Gathering cluster statistics...` });
+        await ctx.sendDeferMessage({ content: `\`${emojis.status.loading}\` Gathering cluster statistics...` });
 
         try {
             // Gather all stats in parallel
@@ -77,85 +78,99 @@ export default class ClusterStats extends Command {
             const arch = process.arch;
             const uptime = process.uptime();
 
-            const embed = new EmbedBuilder()
-                .setColor(this.client.config.color.default)
-                .setTitle('`📊` Cluster Statistics')
-                .setTimestamp();
+            const container = new ContainerBuilder();
 
-            // Bot stats
-            embed.addFields({
-                name: '`🤖` Bot Cluster',
-                value: [
-                    `**Online Bots:** ${onlineBots}/${botStatuses.length}`,
-                    `**Total Guilds:** ${totalGuilds.toLocaleString()}`,
-                    `**Total Players:** ${totalPlayers}`,
-                    `**Active Assignments:** ${activeAssignments}`,
-                    `**Saved Players (DB):** ${activePlayers}`,
-                ].join('\n'),
-                inline: true,
-            });
+            // Header
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(`## ${emojis.status.info} Cluster Statistics`)
+            );
+
+            container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+
+            // Bot Cluster stats
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(
+                    `### ${emojis.misc.bot} Bot Cluster\n` +
+                    `**Online Bots:** ${onlineBots}/${botStatuses.length}\n` +
+                    `**Total Guilds:** ${totalGuilds.toLocaleString()}\n` +
+                    `**Total Players:** ${totalPlayers}\n` +
+                    `**Active Assignments:** ${activeAssignments}\n` +
+                    `**Saved Players (DB):** ${activePlayers}`
+                )
+            );
+
+            container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
 
             // Lavalink stats
-            embed.addFields({
-                name: '`🎵` Lavalink',
-                value: [
-                    `**Connected Bots:** ${lavalinkConnected}/${botStatuses.length}`,
-                    `**Nodes Configured:** ${this.client.config.lavalink?.nodes?.length || 0}`,
-                    `**Active Players:** ${totalPlayers}`,
-                    `**Strategy:** ${this.client.config.loadBalancing?.strategy || 'priority'}`,
-                ].join('\n'),
-                inline: true,
-            });
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(
+                    `### ${emojis.player.music} Lavalink\n` +
+                    `**Connected Bots:** ${lavalinkConnected}/${botStatuses.length}\n` +
+                    `**Nodes Configured:** ${this.client.config.lavalink?.nodes?.length || 0}\n` +
+                    `**Active Players:** ${totalPlayers}\n` +
+                    `**Strategy:** ${this.client.config.loadBalancing?.strategy || 'priority'}`
+                )
+            );
+
+            container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
 
             // Memory stats
-            embed.addFields({
-                name: '`💾` Memory',
-                value: [
-                    `**Total (Bots):** ${totalMemory}MB`,
-                    `**Heap Used:** ${heapUsed}MB / ${heapTotal}MB`,
-                    `**RSS:** ${rss}MB`,
-                ].join('\n'),
-                inline: true,
-            });
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(
+                    `### ${emojis.misc.memory} Memory\n` +
+                    `**Total (Bots):** ${totalMemory}MB\n` +
+                    `**Heap Used:** ${heapUsed}MB / ${heapTotal}MB\n` +
+                    `**RSS:** ${rss}MB`
+                )
+            );
+
+            container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
 
             // System info
-            embed.addFields({
-                name: '`⚙️` System',
-                value: [
-                    `**Node.js:** ${nodeVersion}`,
-                    `**Platform:** ${platform} (${arch})`,
-                    `**Process Uptime:** ${this._formatUptime(uptime * 1000)}`,
-                ].join('\n'),
-                inline: true,
-            });
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(
+                    `### ${emojis.misc.settings} System\n` +
+                    `**Node.js:** ${nodeVersion}\n` +
+                    `**Platform:** ${platform} (${arch})\n` +
+                    `**Process Uptime:** ${this._formatUptime(uptime * 1000)}`
+                )
+            );
 
             // Per-bot breakdown
             if (botStatuses.length > 0) {
+                container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+
                 const botBreakdown = botStatuses.map(bot => {
                     const isOnline = bot.status !== 'Offline' && 
                         (Date.now() - new Date(bot.lastHeartbeat).getTime()) < 60000;
-                    const emoji = isOnline ? '🟢' : '🔴';
+                    const emoji = isOnline ? emojis.status.success : emojis.status.error;
                     const main = bot.isMain ? ' [M]' : '';
                     return `${emoji} **${bot.name}${main}:** ${bot.playerCount || 0}p / ${bot.guildCount || 0}g`;
                 }).join('\n');
 
-                embed.addFields({
-                    name: '`📈` Bot Breakdown',
-                    value: botBreakdown || 'No data',
-                    inline: false,
-                });
+                container.addTextDisplayComponents(
+                    new TextDisplayBuilder().setContent(
+                        `### ${emojis.misc.star} Bot Breakdown\n${botBreakdown || 'No data'}`
+                    )
+                );
             }
 
-            embed.setFooter({
-                text: `Requested by ${ctx.author.tag}`,
-                iconURL: ctx.author.displayAvatarURL(),
-            });
+            container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
 
-            return ctx.editMessage({ content: null, embeds: [embed] });
+            // Footer
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(`-# Requested by ${ctx.author.tag}`)
+            );
+
+            return ctx.editMessage({ 
+                content: null, 
+                components: [container],
+                flags: MessageFlags.IsComponentsV2
+            });
         } catch (error) {
             this.client.logger.error(`[ClusterStats] Error: ${error.message}`);
             return ctx.editMessage({
-                content: `\`❌\` Failed to fetch cluster stats: ${error.message}`,
+                content: `\`${emojis.status.error}\` Failed to fetch cluster stats: ${error.message}`,
             });
         }
     }

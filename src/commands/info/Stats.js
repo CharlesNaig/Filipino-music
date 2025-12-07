@@ -1,4 +1,5 @@
 import Command from "../../structures/Command.js";
+import { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, MessageFlags } from "discord.js";
 import { version } from 'discord.js';
 import os from 'os';
 
@@ -36,20 +37,66 @@ export default class Stats extends Command {
         const totalMemory = (os.totalmem() / 1024 / 1024 / 1024).toFixed(2);
         const freeMemory = (os.freemem() / 1024 / 1024 / 1024).toFixed(2);
         
-        const embed = this.client.embed()
-            .setColor(this.client.color.default)
-            .setAuthor({ name: '📊 Bot Statistics', iconURL: this.client.user.displayAvatarURL() })
-            .setThumbnail(this.client.user.displayAvatarURL())
-            .addFields([
-                { name: '🤖 Bot Information', value: `\`\`\`yml\nServers: ${this.client.guilds.cache.size}\nUsers: ${this.client.users.cache.size}\nChannels: ${this.client.channels.cache.size}\nCommands: ${this.client.commands.size}\`\`\``, inline: false },
-                { name: '⏰ Uptime', value: `\`\`\`yml\n${uptime}\`\`\``, inline: true },
-                { name: '🏓 Ping', value: `\`\`\`yml\nWS: ${Math.round(this.client.ws.ping)}ms\`\`\``, inline: true },
-                { name: '💾 Memory', value: `\`\`\`yml\nUsed: ${memoryUsage} MB\nFree: ${freeMemory} GB\nTotal: ${totalMemory} GB\`\`\``, inline: false },
-                { name: '🖥️ System', value: `\`\`\`yml\nPlatform: ${os.platform()}\nCPU Cores: ${os.cpus().length}\nNode.js: ${process.version}\nDiscord.js: v${version}\`\`\``, inline: false },
-            ])
-            .setFooter({ text: `Requested by ${ctx.author.tag}`, iconURL: ctx.author.displayAvatarURL({ dynamic: true }) })
-            .setTimestamp();
+        const container = new ContainerBuilder();
         
-        return ctx.sendMessage({ embeds: [embed] });
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`## 📊 Bot Statistics`)
+        );
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+        
+        // Bot Information
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                `### 🤖 Bot Information\n` +
+                `**Servers:** ${this.client.guilds.cache.size}\n` +
+                `**Users:** ${this.client.users.cache.size}\n` +
+                `**Channels:** ${this.client.channels.cache.size}\n` +
+                `**Commands:** ${this.client.commands.size}`
+            )
+        );
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+        
+        // Performance
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                `### ⚡ Performance\n` +
+                `**Uptime:** ${uptime}\n` +
+                `**Ping:** ${Math.round(this.client.ws.ping)}ms`
+            )
+        );
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+        
+        // Memory
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                `### 💾 Memory\n` +
+                `**Used:** ${memoryUsage} MB\n` +
+                `**Free:** ${freeMemory} GB\n` +
+                `**Total:** ${totalMemory} GB`
+            )
+        );
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+        
+        // System
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                `### 🖥️ System\n` +
+                `**Platform:** ${os.platform()}\n` +
+                `**CPU Cores:** ${os.cpus().length}\n` +
+                `**Node.js:** ${process.version}\n` +
+                `**Discord.js:** v${version}`
+            )
+        );
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+        
+        // Footer
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`-# Requested by ${ctx.author.tag}`)
+        );
+        
+        return ctx.sendMessage({ 
+            components: [container],
+            flags: MessageFlags.IsComponentsV2
+        });
     }
 }

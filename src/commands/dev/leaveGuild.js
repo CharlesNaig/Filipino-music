@@ -1,4 +1,6 @@
 import Command from '../../structures/Command.js';
+import { ContainerBuilder, TextDisplayBuilder, MessageFlags } from 'discord.js';
+import emojis from '../../emojis.js';
 
 export default class LeaveGuild extends Command {
     constructor(client) {
@@ -21,15 +23,31 @@ export default class LeaveGuild extends Command {
             slashCommand: false,
         });
     }
+
+    _buildContainer(title, message) {
+        const container = new ContainerBuilder();
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`### ${title}\n${message}`)
+        );
+        return container;
+    }
+
     async run(ctx, args) {
         const guild = this.client.guilds.cache.get(args.join(" "));
 
         if (!guild) {
-            return ctx.sendMessage("❌ Guild not found.");
+            return ctx.sendMessage({ 
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'Guild not found.')],
+                flags: MessageFlags.IsComponentsV2
+            });
         }
 
         const guildName = guild.name;
         await guild.leave();
-        await ctx.sendMessage(`✅ Left guild: **${guildName}**`);
+        
+        return ctx.sendMessage({ 
+            components: [this._buildContainer(`${emojis.status.success} Left Guild`, `Left guild: **${guildName}**`)],
+            flags: MessageFlags.IsComponentsV2
+        });
     }
 }

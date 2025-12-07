@@ -5,9 +5,10 @@
  * Useful for load balancing or troubleshooting.
  */
 
-import { ApplicationCommandOptionType, PermissionFlagsBits } from 'discord.js';
+import { ApplicationCommandOptionType, PermissionFlagsBits, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, MessageFlags } from 'discord.js';
 import Command from '../../structures/Command.js';
 import { botCluster, loadBalancer } from '../../orchestrator.js';
+import emojis from '../../emojis.js';
 
 export default class Reassign extends Command {
     constructor(client, file) {
@@ -46,6 +47,14 @@ export default class Reassign extends Command {
         });
     }
 
+    _buildContainer(title, message) {
+        const container = new ContainerBuilder();
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`### ${title}\n${message}`)
+        );
+        return container;
+    }
+
     async run(ctx, args) {
         const targetBotId = ctx.isInteraction
             ? ctx.interaction.options.getString('bot')
@@ -57,12 +66,8 @@ export default class Reassign extends Command {
 
         if (!targetBotId) {
             return ctx.sendMessage({
-                embeds: [{
-                    color: parseInt(this.client.config.color.error.replace('#', ''), 16),
-                    title: `\`❌\` Missing Argument`,
-                    description: `Please specify a target bot ID.\n\n**Available Bots:**\n${this._listBots()}`,
-                    timestamp: new Date().toISOString(),
-                }],
+                components: [this._buildContainer(`${emojis.status.error} Missing Argument`, `Please specify a target bot ID.\n\n**Available Bots:**\n${this._listBots()}`)],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
@@ -70,36 +75,24 @@ export default class Reassign extends Command {
         const targetClient = botCluster.get(targetBotId);
         if (!targetClient) {
             return ctx.sendMessage({
-                embeds: [{
-                    color: parseInt(this.client.config.color.error.replace('#', ''), 16),
-                    title: `\`❌\` Bot Not Found`,
-                    description: `Bot \`${targetBotId}\` does not exist.\n\n**Available Bots:**\n${this._listBots()}`,
-                    timestamp: new Date().toISOString(),
-                }],
+                components: [this._buildContainer(`${emojis.status.error} Bot Not Found`, `Bot \`${targetBotId}\` does not exist.\n\n**Available Bots:**\n${this._listBots()}`)],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
         // Check if bot is online
         if (!targetClient.isReady()) {
             return ctx.sendMessage({
-                embeds: [{
-                    color: parseInt(this.client.config.color.error.replace('#', ''), 16),
-                    title: `\`❌\` Bot Offline`,
-                    description: `Bot \`${targetBotId}\` (${targetClient.botName}) is currently offline.`,
-                    timestamp: new Date().toISOString(),
-                }],
+                components: [this._buildContainer(`${emojis.status.error} Bot Offline`, `Bot \`${targetBotId}\` (${targetClient.botName}) is currently offline.`)],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
         // Check if bot has Lavalink connected
         if (!targetClient.lavalink?.nodeManager?.nodes?.size) {
             return ctx.sendMessage({
-                embeds: [{
-                    color: parseInt(this.client.config.color.warn.replace('#', ''), 16),
-                    title: `\`⚠️\` Warning`,
-                    description: `Bot \`${targetBotId}\` (${targetClient.botName}) has no Lavalink connection.\nMusic features may not work.`,
-                    timestamp: new Date().toISOString(),
-                }],
+                components: [this._buildContainer(`${emojis.status.warning} Warning`, `Bot \`${targetBotId}\` (${targetClient.botName}) has no Lavalink connection.\nMusic features may not work.`)],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
@@ -109,69 +102,64 @@ export default class Reassign extends Command {
 
             if (!result.success) {
                 return ctx.sendMessage({
-                    embeds: [{
-                        color: parseInt(this.client.config.color.error.replace('#', ''), 16),
-                        title: `\`❌\` Reassignment Failed`,
-                        description: result.message,
-                        timestamp: new Date().toISOString(),
-                    }],
+                    components: [this._buildContainer(`${emojis.status.error} Reassignment Failed`, result.message)],
+                    flags: MessageFlags.IsComponentsV2
                 });
             }
 
-            // Build success embed
-            const embed = {
-                color: parseInt(this.client.config.color.success.replace('#', ''), 16),
-                title: `\`✅\` Guild Reassigned`,
-                description: [
-                    `**Guild:** \`${guildId}\``,
-                    `**Assigned To:** ${targetClient.botName} (\`${targetBotId}\`)`,
-                    ``,
-                    `\`💡\` The guild will now use this bot for music commands.`,
-                ].join('\n'),
-                fields: [
-                    {
-                        name: `\`📊\` Target Bot Status`,
-                        value: [
-                            `**Status:** ${targetClient.isReady() ? '`🟢` Online' : '`🔴` Offline'}`,
-                            `**Players:** ${targetClient.lavalink?.players?.size || 0}`,
-                            `**Lavalink:** ${targetClient.lavalink?.nodeManager?.nodes?.size ? '`✓` Connected' : '`✗` Disconnected'}`,
-                        ].join('\n'),
-                        inline: true,
-                    },
-                ],
-                footer: {
-                    text: `Requested by ${ctx.author.tag}`,
-                    icon_url: ctx.author.displayAvatarURL(),
-                },
-                timestamp: new Date().toISOString(),
-            };
+            // Build success container
+            const container = new ContainerBuilder();
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(`### ${emojis.status.success} Guild Reassigned`)
+            );
+            container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(
+                    `**Guild:** \`${guildId}\`\n` +
+                    `**Assigned To:** ${targetClient.botName} (\`${targetBotId}\`)\n\n` +
+                    `${emojis.status.info} The guild will now use this bot for music commands.`
+                )
+            );
+            container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(
+                    `**${emojis.misc.bot} Target Bot Status**\n` +
+                    `**Status:** ${targetClient.isReady() ? `${emojis.status.success} Online` : `${emojis.status.error} Offline`}\n` +
+                    `**Players:** ${targetClient.lavalink?.players?.size || 0}\n` +
+                    `**Lavalink:** ${targetClient.lavalink?.nodeManager?.nodes?.size ? `${emojis.status.check} Connected` : `${emojis.status.error} Disconnected`}`
+                )
+            );
 
             // Note about active player
             const currentPlayer = this.client.lavalink?.getPlayer(guildId);
             if (currentPlayer) {
-                embed.fields.push({
-                    name: `\`⚠️\` Active Player`,
-                    value: [
-                        `There's an active player in this guild.`,
-                        `The player will continue on the current bot until stopped.`,
-                        `New music commands will be handled by the new bot.`,
-                    ].join('\n'),
-                    inline: false,
-                });
+                container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+                container.addTextDisplayComponents(
+                    new TextDisplayBuilder().setContent(
+                        `**${emojis.status.warning} Active Player**\n` +
+                        `There's an active player in this guild.\n` +
+                        `The player will continue on the current bot until stopped.\n` +
+                        `New music commands will be handled by the new bot.`
+                    )
+                );
             }
 
-            return ctx.sendMessage({ embeds: [embed] });
+            container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(`-# Requested by ${ctx.author.tag}`)
+            );
+
+            return ctx.sendMessage({ 
+                components: [container],
+                flags: MessageFlags.IsComponentsV2
+            });
 
         } catch (error) {
             this.client.logger.error(`[Reassign] Error: ${error.message}`);
             
             return ctx.sendMessage({
-                embeds: [{
-                    color: parseInt(this.client.config.color.error.replace('#', ''), 16),
-                    title: `\`❌\` Error`,
-                    description: `An error occurred while reassigning the guild.\n\`\`\`${error.message}\`\`\``,
-                    timestamp: new Date().toISOString(),
-                }],
+                components: [this._buildContainer(`${emojis.status.error} Error`, `An error occurred while reassigning the guild.\n\`\`\`${error.message}\`\`\``)],
+                flags: MessageFlags.IsComponentsV2
             });
         }
     }
@@ -183,7 +171,7 @@ export default class Reassign extends Command {
     _listBots() {
         const lines = [];
         for (const [botId, client] of botCluster) {
-            const status = client.isReady() ? '🟢' : '🔴';
+            const status = client.isReady() ? emojis.status.success : emojis.status.error;
             const main = client.isMainBot ? ' (Main)' : '';
             lines.push(`${status} \`${botId}\` - ${client.botName}${main}`);
         }

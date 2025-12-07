@@ -5,6 +5,8 @@
  */
 
 import Command from '../../structures/Command.js';
+import { ContainerBuilder, TextDisplayBuilder, MessageFlags } from 'discord.js';
+import emojis from '../../emojis.js';
 
 export default class Pause extends Command {
     constructor(client, file) {
@@ -31,37 +33,45 @@ export default class Pause extends Command {
         this.file = file;
     }
 
+    _buildContainer(title, message) {
+        const container = new ContainerBuilder();
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`### ${title}\n${message}`)
+        );
+        return container;
+    }
+
     async run(ctx, args) {
-        // Check if user is in a voice channel
         const member = ctx.member;
         const voiceChannel = member.voice?.channel;
 
         if (!voiceChannel) {
             return ctx.sendMessage({
-                content: `\`❌\` You need to be in a voice channel!`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'You need to be in a voice channel!')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
-        // Get player
         const player = this.client.lavalink?.players.get(ctx.guild.id);
 
         if (!player) {
             return ctx.sendMessage({
-                content: `\`❌\` Nothing is playing right now!`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'Nothing is playing right now!')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
-        // Check if user is in the same voice channel
         if (player.voiceChannelId !== voiceChannel.id) {
             return ctx.sendMessage({
-                content: `\`❌\` You need to be in the same voice channel as me!`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'You need to be in the same voice channel as me!')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
-        // Check if already paused
         if (player.paused) {
             return ctx.sendMessage({
-                content: `\`⏸️\` Already paused! Use \`resume\` to continue.`,
+                components: [this._buildContainer(`${emojis.player.pause} Already Paused`, 'Use `resume` to continue playback.')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
@@ -69,12 +79,14 @@ export default class Pause extends Command {
             await player.pause();
 
             return ctx.sendMessage({
-                content: `\`⏸️\` Paused playback. Use \`resume\` to continue.`,
+                components: [this._buildContainer(`${emojis.player.pause} Paused`, 'Playback paused. Use `resume` to continue.')],
+                flags: MessageFlags.IsComponentsV2
             });
         } catch (error) {
             this.client.logger.error(`[Pause] Error: ${error.message}`);
             return ctx.sendMessage({
-                content: `\`❌\` Failed to pause: ${error.message}`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, `Failed to pause: ${error.message}`)],
+                flags: MessageFlags.IsComponentsV2
             });
         }
     }

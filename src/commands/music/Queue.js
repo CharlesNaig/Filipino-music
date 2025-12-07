@@ -5,8 +5,9 @@
  */
 
 import Command from '../../structures/Command.js';
-import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SectionBuilder, ThumbnailBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
 import { formatDuration } from '../../managers/LavalinkHandler.js';
+import emojis from '../../emojis.js';
 
 export default class Queue extends Command {
     constructor(client, file) {
@@ -41,12 +42,27 @@ export default class Queue extends Command {
     }
 
     async run(ctx, args) {
+        const member = ctx.member;
+        const voiceChannel = member.voice?.channel;
+
+        if (!voiceChannel) {
+            return ctx.sendMessage({
+                content: `\`${emojis.status.error}\` You need to be in a voice channel!`,
+            });
+        }
+
         // Get player
         const player = this.client.lavalink?.players.get(ctx.guild.id);
 
         if (!player || !player.queue.current) {
             return ctx.sendMessage({
-                content: `\`❌\` Nothing is playing right now!`,
+                content: `\`${emojis.status.error}\` Nothing is playing right now!`,
+            });
+        }
+
+        if (player.voiceChannelId !== voiceChannel.id) {
+            return ctx.sendMessage({
+                content: `\`${emojis.status.error}\` You need to be in the same voice channel as me!`,
             });
         }
 
@@ -58,99 +74,18 @@ export default class Queue extends Command {
             ? ctx.interaction.options.getInteger('page') || 1
             : parseInt(args[0]) || 1;
 
-        const tracksPerPage = 10;
+        const tracksPerPage = 3;
         const totalPages = Math.ceil(queue.length / tracksPerPage) || 1;
 
         // Clamp page number
         page = Math.max(1, Math.min(page, totalPages));
 
-        // Build embed
-        const embed = new EmbedBuilder()
-            .setColor(this.client.config.color.default)
-            .setAuthor({
-                name: `Queue for ${ctx.guild.name}`,
-                iconURL: ctx.guild.iconURL({ dynamic: true }),
-            });
-
-        // Add current track
-        const currentDuration = current.info.isStream 
-            ? '🔴 LIVE' 
-            : `${formatDuration(player.position)}/${formatDuration(current.info.duration)}`;
-        
-        embed.setDescription(
-            `**Now Playing:**\n` +
-            `[${current.info.title}](${current.info.uri}) - \`${currentDuration}\`\n` +
-            `Requested by: ${current.requester?.username || 'Unknown'}\n\n` +
-            `**Up Next:** (${queue.length} track${queue.length !== 1 ? 's' : ''})`
-        );
-
-        // Add queue tracks
-        if (queue.length > 0) {
-            const startIndex = (page - 1) * tracksPerPage;
-            const endIndex = Math.min(startIndex + tracksPerPage, queue.length);
-            const pageTracks = queue.slice(startIndex, endIndex);
-
-            const queueList = pageTracks.map((track, index) => {
-                const position = startIndex + index + 1;
-                const duration = track.info.isStream ? '🔴 LIVE' : formatDuration(track.info.duration);
-                const requester = track.requester?.username || 'Unknown';
-                return `\`${position}.\` [${track.info.title.substring(0, 40)}${track.info.title.length > 40 ? '...' : ''}](${track.info.uri}) - \`${duration}\` (${requester})`;
-            }).join('\n');
-
-            embed.addFields({
-                name: '\u200b',
-                value: queueList || 'No tracks in queue',
-            });
-        } else {
-            embed.addFields({
-                name: '\u200b',
-                value: 'No tracks in queue. Use `play` to add some!',
-            });
-        }
-
-        // Add footer with page info
-        const totalDuration = queue.reduce((acc, t) => acc + (t.info.duration || 0), 0);
-        embed.setFooter({
-            text: `Page ${page}/${totalPages} | Total Duration: ${formatDuration(totalDuration)} | Loop: ${player.repeatMode || 'off'}`,
-        });
-
-        // Build pagination buttons if needed
-        const components = [];
-        if (totalPages > 1) {
-            const row = new ActionRowBuilder()
-                .addComponents(
-                    new ButtonBuilder()
-                        .setCustomId('queue_first')
-                        .setEmoji('⏮️')
-                        .setStyle(ButtonStyle.Secondary)
-                        .setDisabled(page === 1),
-                    new ButtonBuilder()
-                        .setCustomId('queue_prev')
-                        .setEmoji('◀️')
-                        .setStyle(ButtonStyle.Secondary)
-                        .setDisabled(page === 1),
-                    new ButtonBuilder()
-                        .setCustomId('queue_page')
-                        .setLabel(`${page}/${totalPages}`)
-                        .setStyle(ButtonStyle.Primary)
-                        .setDisabled(true),
-                    new ButtonBuilder()
-                        .setCustomId('queue_next')
-                        .setEmoji('▶️')
-                        .setStyle(ButtonStyle.Secondary)
-                        .setDisabled(page === totalPages),
-                    new ButtonBuilder()
-                        .setCustomId('queue_last')
-                        .setEmoji('⏭️')
-                        .setStyle(ButtonStyle.Secondary)
-                        .setDisabled(page === totalPages),
-                );
-            components.push(row);
-        }
+        // Build container with pagination buttons inside
+        const container = this._buildQueueContainer(ctx, player, current, queue, page, tracksPerPage, totalPages);
 
         const message = await ctx.sendMessage({
-            embeds: [embed],
-            components,
+            components: [container],
+            flags: MessageFlags.IsComponentsV2
         });
 
         // Set up button collector if pagination exists
@@ -163,63 +98,29 @@ export default class Queue extends Command {
             let currentPage = page;
 
             collector.on('collect', async (interaction) => {
-                switch (interaction.customId) {
-                    case 'queue_first':
-                        currentPage = 1;
-                        break;
-                    case 'queue_prev':
-                        currentPage = Math.max(1, currentPage - 1);
-                        break;
-                    case 'queue_next':
-                        currentPage = Math.min(totalPages, currentPage + 1);
-                        break;
-                    case 'queue_last':
-                        currentPage = totalPages;
-                        break;
+                if (interaction.customId === 'queue_prev') {
+                    currentPage = Math.max(1, currentPage - 1);
+                } else if (interaction.customId === 'queue_next') {
+                    currentPage = Math.min(totalPages, currentPage + 1);
                 }
 
-                // Rebuild embed for new page
-                const newEmbed = await this._buildQueueEmbed(ctx, player, currentPage, tracksPerPage);
-                const newRow = this._buildPaginationRow(currentPage, totalPages);
+                // Rebuild container for new page
+                const newContainer = this._buildQueueContainer(ctx, player, current, queue, currentPage, tracksPerPage, totalPages);
 
                 await interaction.update({
-                    embeds: [newEmbed],
-                    components: [newRow],
+                    components: [newContainer],
+                    flags: MessageFlags.IsComponentsV2
                 });
             });
 
             collector.on('end', async () => {
                 try {
-                    const disabledRow = new ActionRowBuilder()
-                        .addComponents(
-                            new ButtonBuilder()
-                                .setCustomId('queue_first')
-                                .setEmoji('⏮️')
-                                .setStyle(ButtonStyle.Secondary)
-                                .setDisabled(true),
-                            new ButtonBuilder()
-                                .setCustomId('queue_prev')
-                                .setEmoji('◀️')
-                                .setStyle(ButtonStyle.Secondary)
-                                .setDisabled(true),
-                            new ButtonBuilder()
-                                .setCustomId('queue_page')
-                                .setLabel(`${currentPage}/${totalPages}`)
-                                .setStyle(ButtonStyle.Primary)
-                                .setDisabled(true),
-                            new ButtonBuilder()
-                                .setCustomId('queue_next')
-                                .setEmoji('▶️')
-                                .setStyle(ButtonStyle.Secondary)
-                                .setDisabled(true),
-                            new ButtonBuilder()
-                                .setCustomId('queue_last')
-                                .setEmoji('⏭️')
-                                .setStyle(ButtonStyle.Secondary)
-                                .setDisabled(true),
-                        );
-
-                    await message.edit({ components: [disabledRow] });
+                    // Rebuild with disabled buttons
+                    const finalContainer = this._buildQueueContainerDisabled(ctx, player, current, queue, currentPage, tracksPerPage, totalPages);
+                    await message.edit({ 
+                        components: [finalContainer],
+                        flags: MessageFlags.IsComponentsV2
+                    });
                 } catch (error) {
                     // Message may be deleted
                 }
@@ -227,83 +128,181 @@ export default class Queue extends Command {
         }
     }
 
-    async _buildQueueEmbed(ctx, player, page, tracksPerPage) {
-        const queue = player.queue.tracks;
-        const current = player.queue.current;
-        const totalPages = Math.ceil(queue.length / tracksPerPage) || 1;
+    _buildQueueContainer(ctx, player, current, queue, page, tracksPerPage, totalPages) {
+        const container = new ContainerBuilder();
 
-        const embed = new EmbedBuilder()
-            .setColor(this.client.config.color.default)
-            .setAuthor({
-                name: `Queue for ${ctx.guild.name}`,
-                iconURL: ctx.guild.iconURL({ dynamic: true }),
-            });
-
+        // Now Playing section with thumbnail
         const currentDuration = current.info.isStream 
-            ? '🔴 LIVE' 
-            : `${formatDuration(player.position)}/${formatDuration(current.info.duration)}`;
+            ? `${emojis.player.live} LIVE` 
+            : formatDuration(current.info.duration);
+        const currentThumbnail = current.info.artworkUrl || `https://img.youtube.com/vi/${current.info.identifier}/mqdefault.jpg`;
         
-        embed.setDescription(
-            `**Now Playing:**\n` +
-            `[${current.info.title}](${current.info.uri}) - \`${currentDuration}\`\n` +
-            `Requested by: ${current.requester?.username || 'Unknown'}\n\n` +
-            `**Up Next:** (${queue.length} track${queue.length !== 1 ? 's' : ''})`
-        );
+        const nowPlayingSection = new SectionBuilder()
+            .addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(
+                    `**${emojis.player.nowPlaying} Now Playing**\n[${current.info.title}](${current.info.uri})\n\`${currentDuration}\``
+                )
+            )
+            .setThumbnailAccessory(
+                new ThumbnailBuilder().setURL(currentThumbnail)
+            );
+        container.addSectionComponents(nowPlayingSection);
 
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+
+        // Queue tracks with thumbnails
         if (queue.length > 0) {
             const startIndex = (page - 1) * tracksPerPage;
             const endIndex = Math.min(startIndex + tracksPerPage, queue.length);
             const pageTracks = queue.slice(startIndex, endIndex);
 
-            const queueList = pageTracks.map((track, index) => {
+            pageTracks.forEach((track, index) => {
                 const position = startIndex + index + 1;
-                const duration = track.info.isStream ? '🔴 LIVE' : formatDuration(track.info.duration);
-                const requester = track.requester?.username || 'Unknown';
-                return `\`${position}.\` [${track.info.title.substring(0, 40)}${track.info.title.length > 40 ? '...' : ''}](${track.info.uri}) - \`${duration}\` (${requester})`;
-            }).join('\n');
+                const duration = track.info.isStream ? `${emojis.player.live} LIVE` : formatDuration(track.info.duration);
+                const title = track.info.title.length > 45 
+                    ? track.info.title.substring(0, 45) + '...' 
+                    : track.info.title;
+                const thumbnail = track.info.artworkUrl || `https://img.youtube.com/vi/${track.info.identifier}/mqdefault.jpg`;
 
-            embed.addFields({
-                name: '\u200b',
-                value: queueList,
+                // Track section with thumbnail accessory
+                const trackSection = new SectionBuilder()
+                    .addTextDisplayComponents(
+                        new TextDisplayBuilder().setContent(
+                            `**${position}.** [${title}](${track.info.uri})\n\`${duration}\``
+                        )
+                    )
+                    .setThumbnailAccessory(
+                        new ThumbnailBuilder().setURL(thumbnail)
+                    );
+                container.addSectionComponents(trackSection);
+
+                // Add separator between tracks (except last one)
+                if (index < pageTracks.length - 1) {
+                    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+                }
             });
+        } else {
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent('No tracks in queue. Use `play` to add some!')
+            );
         }
 
-        const totalDuration = queue.reduce((acc, t) => acc + (t.info.duration || 0), 0);
-        embed.setFooter({
-            text: `Page ${page}/${totalPages} | Total Duration: ${formatDuration(totalDuration)} | Loop: ${player.repeatMode || 'off'}`,
-        });
+        // Pagination buttons inside container
+        if (totalPages > 1) {
+            container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+            container.addActionRowComponents(row => 
+                row.addComponents(
+                    new ButtonBuilder()
+                        .setCustomId('queue_prev')
+                        .setEmoji(emojis.navigation.previous)
+                        .setStyle(ButtonStyle.Secondary)
+                        .setDisabled(page === 1),
+                    new ButtonBuilder()
+                        .setCustomId('queue_next')
+                        .setEmoji(emojis.navigation.next)
+                        .setStyle(ButtonStyle.Secondary)
+                        .setDisabled(page === totalPages)
+                )
+            );
+        }
 
-        return embed;
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+
+        // Footer with page info
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                `**Page ${page}/${totalPages}** · ${queue.length} track${queue.length !== 1 ? 's' : ''} in queue`
+            )
+        );
+
+        return container;
     }
 
-    _buildPaginationRow(currentPage, totalPages) {
-        return new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setCustomId('queue_first')
-                    .setEmoji('⏮️')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setDisabled(currentPage === 1),
-                new ButtonBuilder()
-                    .setCustomId('queue_prev')
-                    .setEmoji('◀️')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setDisabled(currentPage === 1),
-                new ButtonBuilder()
-                    .setCustomId('queue_page')
-                    .setLabel(`${currentPage}/${totalPages}`)
-                    .setStyle(ButtonStyle.Primary)
-                    .setDisabled(true),
-                new ButtonBuilder()
-                    .setCustomId('queue_next')
-                    .setEmoji('▶️')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setDisabled(currentPage === totalPages),
-                new ButtonBuilder()
-                    .setCustomId('queue_last')
-                    .setEmoji('⏭️')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setDisabled(currentPage === totalPages),
+    _buildQueueContainerDisabled(ctx, player, current, queue, page, tracksPerPage, totalPages) {
+        const container = new ContainerBuilder();
+
+        // Now Playing section with thumbnail
+        const currentDuration = current.info.isStream 
+            ? `${emojis.player.live} LIVE` 
+            : formatDuration(current.info.duration);
+        const currentThumbnail = current.info.artworkUrl || `https://img.youtube.com/vi/${current.info.identifier}/mqdefault.jpg`;
+        
+        const nowPlayingSection = new SectionBuilder()
+            .addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(
+                    `**${emojis.player.nowPlaying} Now Playing**\n[${current.info.title}](${current.info.uri})\n\`${currentDuration}\``
+                )
+            )
+            .setThumbnailAccessory(
+                new ThumbnailBuilder().setURL(currentThumbnail)
             );
+        container.addSectionComponents(nowPlayingSection);
+
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+
+        // Queue tracks with thumbnails
+        if (queue.length > 0) {
+            const startIndex = (page - 1) * tracksPerPage;
+            const endIndex = Math.min(startIndex + tracksPerPage, queue.length);
+            const pageTracks = queue.slice(startIndex, endIndex);
+
+            pageTracks.forEach((track, index) => {
+                const position = startIndex + index + 1;
+                const duration = track.info.isStream ? `${emojis.player.live} LIVE` : formatDuration(track.info.duration);
+                const title = track.info.title.length > 45 
+                    ? track.info.title.substring(0, 45) + '...' 
+                    : track.info.title;
+                const thumbnail = track.info.artworkUrl || `https://img.youtube.com/vi/${track.info.identifier}/mqdefault.jpg`;
+
+                // Track section with thumbnail accessory
+                const trackSection = new SectionBuilder()
+                    .addTextDisplayComponents(
+                        new TextDisplayBuilder().setContent(
+                            `**${position}.** [${title}](${track.info.uri})\n\`${duration}\``
+                        )
+                    )
+                    .setThumbnailAccessory(
+                        new ThumbnailBuilder().setURL(thumbnail)
+                    );
+                container.addSectionComponents(trackSection);
+
+                if (index < pageTracks.length - 1) {
+                    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+                }
+            });
+        } else {
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent('No tracks in queue. Use `play` to add some!')
+            );
+        }
+
+        // Disabled pagination buttons
+        if (totalPages > 1) {
+            container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+            container.addActionRowComponents(row => 
+                row.addComponents(
+                    new ButtonBuilder()
+                        .setCustomId('queue_prev')
+                        .setEmoji(emojis.navigation.previous)
+                        .setStyle(ButtonStyle.Secondary)
+                        .setDisabled(true),
+                    new ButtonBuilder()
+                        .setCustomId('queue_next')
+                        .setEmoji(emojis.navigation.next)
+                        .setStyle(ButtonStyle.Secondary)
+                        .setDisabled(true)
+                )
+            );
+        }
+
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                `**Page ${page}/${totalPages}** · ${queue.length} track${queue.length !== 1 ? 's' : ''} in queue`
+            )
+        );
+
+        return container;
     }
 }

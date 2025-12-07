@@ -2,12 +2,14 @@
  * Track Start Event
  * 
  * Fires when a track starts playing.
- * Sends "Now Playing" embed with track information and controls.
+ * Sends "Now Playing" container with track information and controls.
  */
 
 import Event from '../../structures/Event.js';
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
-import { formatDuration, createProgressBar, savePlayerState } from '../../managers/LavalinkHandler.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, MediaGalleryBuilder, MediaGalleryItemBuilder, MessageFlags } from 'discord.js';
+import { formatDuration, savePlayerState } from '../../managers/LavalinkHandler.js';
+import Favorite from '../../schemas/Favorite.js';
+import emojis from '../../emojis.js';
 
 export default class TrackStart extends Event {
     constructor(...args) {
@@ -34,11 +36,8 @@ export default class TrackStart extends Event {
         // Update player state in database
         await savePlayerState(player, this.client);
         
-        // Build Now Playing embed
-        const embed = this._buildNowPlayingEmbed(track, player);
-        
-        // Build control buttons
-        const row = this._buildControlButtons(player);
+        // Build Now Playing container with buttons inside
+        const components = this._buildNowPlayingComponents(track, player);
         
         try {
             // Delete previous now playing message
@@ -56,8 +55,8 @@ export default class TrackStart extends Event {
             
             // Send new now playing message
             const message = await textChannel.send({
-                embeds: [embed],
-                components: [row],
+                components,
+                flags: MessageFlags.IsComponentsV2
             });
             
             // Store message ID for later deletion
@@ -72,103 +71,102 @@ export default class TrackStart extends Event {
     }
     
     /**
-     * Build Now Playing embed
+     * Build Now Playing components (container with media gallery and buttons)
      * @private
      */
-    _buildNowPlayingEmbed(track, player) {
-        const requester = track.requester;
-        const duration = track.info.isStream ? '🔴 LIVE' : formatDuration(track.info.duration);
-        
-        const embed = new EmbedBuilder()
-            .setColor(this.client.config.color.default)
-            .setAuthor({
-                name: 'Now Playing',
-                iconURL: this.client.user.displayAvatarURL(),
-            })
-            .setTitle(track.info.title)
-            .setURL(track.info.uri)
-            .setThumbnail(track.info.artworkUrl || track.info.thumbnail || null)
-            .addFields(
-                {
-                    name: '`👤` Artist',
-                    value: track.info.author || 'Unknown',
-                    inline: true,
-                },
-                {
-                    name: '`⏱️` Duration',
-                    value: duration,
-                    inline: true,
-                },
-                {
-                    name: '`🔊` Volume',
-                    value: `${player.volume}%`,
-                    inline: true,
-                }
-            );
-        
-        // Add queue info
-        const queueLength = player.queue.tracks.length;
-        if (queueLength > 0) {
-            embed.addFields({
-                name: '`📜` Queue',
-                value: `${queueLength} track${queueLength !== 1 ? 's' : ''} remaining`,
-                inline: true,
-            });
+    _buildNowPlayingComponents(track, player) {
+        const container = new ContainerBuilder();
+
+        // Media Gallery with track artwork
+        if (track.info.artworkUrl || track.info.thumbnail) {
+            const mediaGallery = new MediaGalleryBuilder()
+                .addItems(
+                    new MediaGalleryItemBuilder()
+                        .setURL(track.info.artworkUrl || track.info.thumbnail)
+                        .setDescription(`${track.info.title} - ${track.info.author}`)
+                );
+            container.addMediaGalleryComponents(mediaGallery);
         }
-        
-        // Add loop mode if enabled
-        if (player.repeatMode && player.repeatMode !== 'off') {
-            embed.addFields({
-                name: '`🔁` Loop',
-                value: player.repeatMode === 'track' ? 'Track' : 'Queue',
-                inline: true,
-            });
-        }
-        
-        // Add requester info
-        if (requester) {
-            embed.setFooter({
-                text: `Requested by ${requester.username || 'Unknown'}`,
-                iconURL: requester.displayAvatarURL || null,
-            });
-        }
-        
-        embed.setTimestamp();
-        
-        return embed;
-    }
-    
-    /**
-     * Build control buttons
-     * @private
-     */
-    _buildControlButtons(player) {
-        const isPaused = player.paused;
-        
-        return new ActionRowBuilder()
+
+        // Now Playing header and track info
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                `### ${emojis.player.nowPlaying} Now Playing...\n` +
+                `[${track.info.title}](${track.info.uri}) ${track.info.author}`
+            )
+        );
+
+        // Separator before buttons
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+
+        // Row 1: Main playback controls
+        const row1 = new ActionRowBuilder()
             .addComponents(
                 new ButtonBuilder()
-                    .setCustomId('player_previous')
-                    .setEmoji('⏮️')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setDisabled(player.queue.previous.length === 0),
-                new ButtonBuilder()
                     .setCustomId('player_pause')
-                    .setEmoji(isPaused ? '▶️' : '⏸️')
-                    .setStyle(isPaused ? ButtonStyle.Success : ButtonStyle.Primary),
-                new ButtonBuilder()
-                    .setCustomId('player_stop')
-                    .setEmoji('⏹️')
-                    .setStyle(ButtonStyle.Danger),
+                    .setEmoji(player.paused ? emojis.player.play : emojis.player.pause)
+                    .setStyle(ButtonStyle.Secondary),
                 new ButtonBuilder()
                     .setCustomId('player_skip')
-                    .setEmoji('⏭️')
+                    .setEmoji(emojis.player.skip)
+                    .setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder()
+                    .setCustomId('player_stop')
+                    .setEmoji(emojis.player.stop)
                     .setStyle(ButtonStyle.Secondary),
                 new ButtonBuilder()
                     .setCustomId('player_loop')
-                    .setEmoji('🔁')
-                    .setStyle(player.repeatMode !== 'off' ? ButtonStyle.Success : ButtonStyle.Secondary),
+                    .setEmoji(emojis.player.loop)
+                    .setStyle(ButtonStyle.Secondary),
             );
+        container.addActionRowComponents(row1);
+
+        // Row 2: Autoplay
+        const row2 = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('player_autoplay')
+                    .setEmoji(emojis.player.autoplay)
+                    .setStyle(ButtonStyle.Secondary),
+            );
+        container.addActionRowComponents(row2);
+
+        // Row 3: Queue, Lyrics, Shuffle, Volume
+        const row3 = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('player_queue')
+                    .setEmoji(emojis.player.queue)
+                    .setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder()
+                    .setCustomId('player_lyrics')
+                    .setEmoji(emojis.player.lyrics)
+                    .setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder()
+                    .setCustomId('player_shuffle')
+                    .setEmoji(emojis.player.shuffle)
+                    .setStyle(ButtonStyle.Primary),
+                new ButtonBuilder()
+                    .setCustomId('player_volume')
+                    .setEmoji(emojis.player.volume)
+                    .setStyle(ButtonStyle.Secondary),
+            );
+        container.addActionRowComponents(row3);
+
+        // Row 4: Favorite
+        const row4 = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('player_favorite')
+                    .setEmoji(emojis.player.favorite)
+                    .setStyle(ButtonStyle.Secondary),
+            );
+        container.addActionRowComponents(row4);
+
+        // Separator after buttons
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+
+        return [container];
     }
     
     /**
@@ -178,11 +176,10 @@ export default class TrackStart extends Event {
     _setupButtonCollector(message, player, guild) {
         const collector = message.createMessageComponentCollector({
             filter: (i) => i.customId.startsWith('player_'),
-            time: 600000, // 10 minutes
+            time: 600000,
         });
         
         collector.on('collect', async (interaction) => {
-            // Verify user is in the same voice channel
             const member = await guild.members.fetch(interaction.user.id).catch(() => null);
             if (!member?.voice?.channelId || member.voice.channelId !== player.voiceChannelId) {
                 return interaction.reply({
@@ -193,9 +190,6 @@ export default class TrackStart extends Event {
             
             try {
                 switch (interaction.customId) {
-                    case 'player_previous':
-                        await this._handlePrevious(interaction, player);
-                        break;
                     case 'player_pause':
                         await this._handlePause(interaction, player);
                         break;
@@ -208,157 +202,242 @@ export default class TrackStart extends Event {
                     case 'player_loop':
                         await this._handleLoop(interaction, player);
                         break;
+                    case 'player_autoplay':
+                        await this._handleAutoplay(interaction, player);
+                        break;
+                    case 'player_queue':
+                        await this._handleQueue(interaction, player);
+                        break;
+                    case 'player_shuffle':
+                        await this._handleShuffle(interaction, player);
+                        break;
+                    case 'player_volume':
+                        await this._handleVolume(interaction, player);
+                        break;
+                    case 'player_lyrics':
+                        await this._handleLyrics(interaction, player);
+                        break;
+                    case 'player_favorite':
+                        await this._handleFavorite(interaction, player);
+                        break;
                 }
             } catch (error) {
                 this.client.logger.error(`[${this.client.botName}] Button handler error: ${error.message}`);
                 if (!interaction.replied && !interaction.deferred) {
-                    await interaction.reply({
-                        content: `\`❌\` An error occurred!`,
-                        ephemeral: true,
-                    });
+                    await interaction.reply({ content: `\`❌\` An error occurred!`, ephemeral: true });
                 }
             }
         });
         
         collector.on('end', async () => {
             try {
-                // Disable buttons when collector ends
-                const disabledRow = new ActionRowBuilder()
-                    .addComponents(
-                        new ButtonBuilder()
-                            .setCustomId('player_previous')
-                            .setEmoji('⏮️')
-                            .setStyle(ButtonStyle.Secondary)
-                            .setDisabled(true),
-                        new ButtonBuilder()
-                            .setCustomId('player_pause')
-                            .setEmoji('⏸️')
-                            .setStyle(ButtonStyle.Primary)
-                            .setDisabled(true),
-                        new ButtonBuilder()
-                            .setCustomId('player_stop')
-                            .setEmoji('⏹️')
-                            .setStyle(ButtonStyle.Danger)
-                            .setDisabled(true),
-                        new ButtonBuilder()
-                            .setCustomId('player_skip')
-                            .setEmoji('⏭️')
-                            .setStyle(ButtonStyle.Secondary)
-                            .setDisabled(true),
-                        new ButtonBuilder()
-                            .setCustomId('player_loop')
-                            .setEmoji('🔁')
-                            .setStyle(ButtonStyle.Secondary)
-                            .setDisabled(true),
-                    );
-                
-                await message.edit({ components: [disabledRow] });
+                const track = player.queue?.current;
+                if (!track) return;
+
+                const container = this._buildDisabledContainer(track);
+                await message.edit({ components: [container], flags: MessageFlags.IsComponentsV2 });
             } catch (error) {
                 // Message may be deleted
             }
         });
     }
-    
-    /**
-     * Handle previous button
-     * @private
-     */
-    async _handlePrevious(interaction, player) {
-        const previous = player.queue.previous[0];
-        if (!previous) {
-            return interaction.reply({
-                content: `\`❌\` No previous track!`,
-                ephemeral: true,
-            });
+
+    _buildDisabledContainer(track) {
+        const container = new ContainerBuilder();
+
+        if (track.info.artworkUrl || track.info.thumbnail) {
+            const mediaGallery = new MediaGalleryBuilder()
+                .addItems(
+                    new MediaGalleryItemBuilder()
+                        .setURL(track.info.artworkUrl || track.info.thumbnail)
+                        .setDescription(`${track.info.title} - ${track.info.author}`)
+                );
+            container.addMediaGalleryComponents(mediaGallery);
         }
-        
-        await player.play({ track: previous });
-        await interaction.reply({
-            content: `\`⏮️\` Playing previous track!`,
-            ephemeral: true,
-        });
+
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                `### ${emojis.player.nowPlaying} Now Playing...\n[${track.info.title}](${track.info.uri}) ${track.info.author}`
+            )
+        );
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+
+        const row1 = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('player_pause').setEmoji(emojis.player.pause).setStyle(ButtonStyle.Secondary).setDisabled(true),
+            new ButtonBuilder().setCustomId('player_skip').setEmoji(emojis.player.skip).setStyle(ButtonStyle.Secondary).setDisabled(true),
+            new ButtonBuilder().setCustomId('player_stop').setEmoji(emojis.player.stop).setStyle(ButtonStyle.Secondary).setDisabled(true),
+            new ButtonBuilder().setCustomId('player_loop').setEmoji(emojis.player.loop).setStyle(ButtonStyle.Secondary).setDisabled(true),
+        );
+        container.addActionRowComponents(row1);
+
+        const row2 = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('player_autoplay').setEmoji(emojis.player.autoplay).setStyle(ButtonStyle.Secondary).setDisabled(true),
+        );
+        container.addActionRowComponents(row2);
+
+        const row3 = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('player_queue').setEmoji(emojis.player.queue).setStyle(ButtonStyle.Secondary).setDisabled(true),
+            new ButtonBuilder().setCustomId('player_lyrics').setEmoji(emojis.player.lyrics).setStyle(ButtonStyle.Secondary).setDisabled(true),
+            new ButtonBuilder().setCustomId('player_shuffle').setEmoji(emojis.player.shuffle).setStyle(ButtonStyle.Primary).setDisabled(true),
+            new ButtonBuilder().setCustomId('player_volume').setEmoji(emojis.player.volume).setStyle(ButtonStyle.Secondary).setDisabled(true),
+        );
+        container.addActionRowComponents(row3);
+
+        const row4 = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('player_favorite').setEmoji(emojis.player.favorite).setStyle(ButtonStyle.Secondary).setDisabled(true),
+        );
+        container.addActionRowComponents(row4);
+
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+        return container;
     }
     
-    /**
-     * Handle pause/resume button
-     * @private
-     */
+    _buildResponseContainer(emoji, title, description) {
+        const container = new ContainerBuilder();
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`### ${emoji} ${title}\n${description}`)
+        );
+        return container;
+    }
+
     async _handlePause(interaction, player) {
+        const track = player.queue.current;
+        
         if (player.paused) {
             await player.resume();
-            await interaction.reply({
-                content: `\`▶️\` Resumed playback!`,
-                ephemeral: true,
-            });
+            // Update the now playing message with play emoji (since it's now playing)
+            const updatedComponents = this._buildNowPlayingComponents(track, player);
+            await interaction.update({ components: updatedComponents, flags: MessageFlags.IsComponentsV2 });
         } else {
             await player.pause();
-            await interaction.reply({
-                content: `\`⏸️\` Paused playback!`,
-                ephemeral: true,
-            });
-        }
-        
-        // Update button
-        const newRow = this._buildControlButtons(player);
-        try {
-            await interaction.message.edit({ components: [newRow] });
-        } catch (error) {
-            // Ignore edit errors
+            // Update the now playing message with pause emoji (since it's paused)
+            const updatedComponents = this._buildNowPlayingComponents(track, player);
+            await interaction.update({ components: updatedComponents, flags: MessageFlags.IsComponentsV2 });
         }
     }
     
-    /**
-     * Handle stop button
-     * @private
-     */
     async _handleStop(interaction, player) {
         await player.destroy();
-        await interaction.reply({
-            content: `\`⏹️\` Stopped playback and cleared the queue!`,
-            ephemeral: true,
-        });
+        const container = this._buildResponseContainer(emojis.player.stop, 'Stopped', 'Playback stopped and queue cleared.');
+        await interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2, ephemeral: true });
     }
     
-    /**
-     * Handle skip button
-     * @private
-     */
     async _handleSkip(interaction, player) {
+        const nextTrack = player.queue.tracks[0];
         await player.skip();
-        await interaction.reply({
-            content: `\`⏭️\` Skipped to the next track!`,
-            ephemeral: true,
-        });
+        const container = this._buildResponseContainer(emojis.player.skip, 'Skipped', 
+            nextTrack ? `Now playing: **${nextTrack.info.title}**` : 'No more tracks in queue.');
+        await interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2, ephemeral: true });
     }
     
-    /**
-     * Handle loop button
-     * @private
-     */
     async _handleLoop(interaction, player) {
         const modes = ['off', 'track', 'queue'];
         const currentIndex = modes.indexOf(player.repeatMode || 'off');
         const nextMode = modes[(currentIndex + 1) % modes.length];
-        
         await player.setRepeatMode(nextMode);
-        
-        const modeNames = {
-            off: 'Loop disabled',
-            track: 'Looping current track',
-            queue: 'Looping queue',
+        const modeInfo = { 
+            off: { emoji: '➡️', text: 'Loop disabled' }, 
+            track: { emoji: emojis.player.loopTrack, text: 'Looping current track' }, 
+            queue: { emoji: emojis.player.loop, text: 'Looping entire queue' } 
         };
+        const container = this._buildResponseContainer(modeInfo[nextMode].emoji, 'Loop Mode', modeInfo[nextMode].text);
+        await interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2, ephemeral: true });
+    }
+
+    async _handleAutoplay(interaction, player) {
+        const autoplay = !player.get('autoplay');
+        player.set('autoplay', autoplay);
+        const container = this._buildResponseContainer(emojis.player.autoplay, 'Autoplay', 
+            autoplay ? 'Autoplay has been **enabled**. Similar tracks will play when the queue ends.' 
+                     : 'Autoplay has been **disabled**.');
+        await interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2, ephemeral: true });
+    }
+
+    async _handleQueue(interaction, player) {
+        const queue = player.queue.tracks;
+        const container = new ContainerBuilder();
         
-        await interaction.reply({
-            content: `\`🔁\` ${modeNames[nextMode]}!`,
-            ephemeral: true,
-        });
-        
-        // Update button
-        const newRow = this._buildControlButtons(player);
-        try {
-            await interaction.message.edit({ components: [newRow] });
-        } catch (error) {
-            // Ignore edit errors
+        if (queue.length === 0) {
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(`### ${emojis.player.queue} Queue\nThe queue is empty! Use \`/play\` to add tracks.`)
+            );
+        } else {
+            const queueList = queue.slice(0, 5).map((track, i) => {
+                const duration = formatDuration(track.info.duration);
+                const title = track.info.title.length > 35 ? track.info.title.substring(0, 35) + '...' : track.info.title;
+                return `**${i + 1}.** ${title} \`${duration}\``;
+            }).join('\n');
+            
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(
+                    `### ${emojis.player.queue} Queue (${queue.length} tracks)\n${queueList}${queue.length > 5 ? `\n\n*... and ${queue.length - 5} more tracks*` : ''}`
+                )
+            );
         }
+        
+        await interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2, ephemeral: true });
+    }
+
+    async _handleShuffle(interaction, player) {
+        if (player.queue.tracks.length < 2) {
+            const container = this._buildResponseContainer(emojis.status.error, 'Cannot Shuffle', 'Not enough tracks in queue to shuffle.');
+            return interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2, ephemeral: true });
+        }
+        player.queue.shuffle();
+        const container = this._buildResponseContainer(emojis.player.shuffle, 'Shuffled', `Queue has been shuffled! (${player.queue.tracks.length} tracks)`);
+        await interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2, ephemeral: true });
+    }
+
+    async _handleVolume(interaction, player) {
+        const volumeBar = '█'.repeat(Math.floor(player.volume / 10)) + '░'.repeat(10 - Math.floor(player.volume / 10));
+        const container = new ContainerBuilder();
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                `### ${emojis.player.volume} Volume\n**${player.volume}%** \`${volumeBar}\`\n\nUse \`/volume <0-100>\` to change.`
+            )
+        );
+        await interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2, ephemeral: true });
+    }
+
+    async _handleLyrics(interaction, player) {
+        const track = player.queue.current;
+        const container = new ContainerBuilder();
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                `### ${emojis.player.lyrics} Lyrics\n**${track.info.title}**\n\nLyrics feature coming soon!`
+            )
+        );
+        await interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2, ephemeral: true });
+    }
+
+    async _handleFavorite(interaction, player) {
+        const track = player.queue.current;
+        const favorites = await Favorite.getOrCreate(interaction.user.id);
+        
+        const result = await favorites.addTrack({
+            title: track.info.title,
+            author: track.info.author,
+            uri: track.info.uri,
+            duration: track.info.duration,
+            artworkUrl: track.info.artworkUrl
+        });
+
+        const container = new ContainerBuilder();
+        
+        if (result.success) {
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(
+                    `### ${emojis.player.favorite} Added to Favorites\n**${track.info.title}**\nby ${track.info.author}`
+                )
+            );
+        } else {
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(
+                    `### ${emojis.status.error} Already in Favorites\n**${track.info.title}** is already in your favorites!`
+                )
+            );
+        }
+        
+        await interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2, ephemeral: true });
     }
 }

@@ -6,8 +6,9 @@
  */
 
 import Command from '../../structures/Command.js';
-import { EmbedBuilder } from 'discord.js';
+import { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, MessageFlags } from 'discord.js';
 import BotStatus from '../../schemas/BotStatus.js';
+import emojis from '../../emojis.js';
 
 export default class BotStatusCommand extends Command {
     constructor(client, file) {
@@ -41,15 +42,18 @@ export default class BotStatusCommand extends Command {
 
             if (botStatuses.length === 0) {
                 return ctx.sendMessage({
-                    content: `\`❌\` No bot status data found. Is the orchestrator running?`,
+                    content: `\`${emojis.status.error}\` No bot status data found. Is the orchestrator running?`,
                 });
             }
 
-            const embed = new EmbedBuilder()
-                .setColor(this.client.config.color.default)
-                .setTitle('`🤖` Bot Cluster Status')
-                .setDescription('Current status of all bots in the cluster')
-                .setTimestamp();
+            const container = new ContainerBuilder();
+
+            // Header
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(`## ${emojis.misc.bot} Bot Cluster Status\nCurrent status of all bots in the cluster`)
+            );
+
+            container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
 
             let totalPlayers = 0;
             let totalGuilds = 0;
@@ -65,45 +69,50 @@ export default class BotStatusCommand extends Command {
 
                 const statusEmoji = this._getStatusEmoji(bot.status, isOnline);
                 const mainTag = bot.isMain ? ' `[MAIN]`' : '';
-                const lavalinkStatus = bot.lavalinkConnected ? '`✓`' : '`✗`';
+                const lavalinkStatus = bot.lavalinkConnected ? '✓' : '✗';
 
                 const uptimeStr = this._formatUptime(bot.uptime);
                 const lastSeen = isOnline ? 'Now' : this._formatTimeAgo(bot.lastHeartbeat);
 
-                embed.addFields({
-                    name: `${statusEmoji} ${bot.name}${mainTag}`,
-                    value: [
-                        `**Status:** ${bot.status}`,
-                        `**Players:** ${bot.playerCount || 0} | **Guilds:** ${bot.guildCount || 0}`,
-                        `**Lavalink:** ${lavalinkStatus} | **Ping:** ${bot.ping || 0}ms`,
-                        `**Memory:** ${bot.memoryUsage || 0}MB | **Uptime:** ${uptimeStr}`,
-                        `**Last Seen:** ${lastSeen}`,
-                    ].join('\n'),
-                    inline: true,
-                });
+                container.addTextDisplayComponents(
+                    new TextDisplayBuilder().setContent(
+                        `### ${statusEmoji} ${bot.name}${mainTag}\n` +
+                        `**Status:** ${bot.status}\n` +
+                        `**Players:** ${bot.playerCount || 0} | **Guilds:** ${bot.guildCount || 0}\n` +
+                        `**Lavalink:** ${lavalinkStatus} | **Ping:** ${bot.ping || 0}ms\n` +
+                        `**Memory:** ${bot.memoryUsage || 0}MB | **Uptime:** ${uptimeStr}\n` +
+                        `**Last Seen:** ${lastSeen}`
+                    )
+                );
+
+                container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
             }
 
-            // Add summary
-            embed.addFields({
-                name: '📊 Cluster Summary',
-                value: [
-                    `**Online Bots:** ${onlineBots}/${botStatuses.length}`,
-                    `**Total Players:** ${totalPlayers}`,
-                    `**Total Guilds:** ${totalGuilds}`,
-                ].join('\n'),
-                inline: false,
-            });
+            // Summary
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(
+                    `### ${emojis.status.info} Cluster Summary\n` +
+                    `**Online Bots:** ${onlineBots}/${botStatuses.length}\n` +
+                    `**Total Players:** ${totalPlayers}\n` +
+                    `**Total Guilds:** ${totalGuilds}`
+                )
+            );
 
-            embed.setFooter({
-                text: `Requested by ${ctx.author.tag}`,
-                iconURL: ctx.author.displayAvatarURL(),
-            });
+            container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
 
-            return ctx.sendMessage({ embeds: [embed] });
+            // Footer
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(`-# Requested by ${ctx.author.tag}`)
+            );
+
+            return ctx.sendMessage({ 
+                components: [container],
+                flags: MessageFlags.IsComponentsV2
+            });
         } catch (error) {
             this.client.logger.error(`[BotStatus] Error: ${error.message}`);
             return ctx.sendMessage({
-                content: `\`❌\` Failed to fetch bot status: ${error.message}`,
+                content: `\`${emojis.status.error}\` Failed to fetch bot status: ${error.message}`,
             });
         }
     }

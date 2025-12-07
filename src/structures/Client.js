@@ -1,4 +1,4 @@
-import { Client, Routes, REST, PermissionsBitField, ApplicationCommandType, GatewayIntentBits, Partials, Collection, EmbedBuilder } from 'discord.js';
+import { Client, Routes, REST, PermissionsBitField, ApplicationCommandType, GatewayIntentBits, Partials, Collection, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SectionBuilder, ThumbnailBuilder, MessageFlags } from 'discord.js';
 import { readdirSync, existsSync } from 'fs';
 import pkg from 'mongoose';
 const { connect, set } = pkg;
@@ -89,8 +89,27 @@ export class BotClient extends Client {
         };
     }
     
-    embed() {
-        return new EmbedBuilder();
+    container() {
+        return new ContainerBuilder();
+    }
+    
+    textDisplay(content) {
+        return new TextDisplayBuilder().setContent(content);
+    }
+    
+    separator(options = {}) {
+        const sep = new SeparatorBuilder();
+        if (options.spacing) sep.setSpacing(options.spacing);
+        if (options.divider !== undefined) sep.setDivider(options.divider);
+        return sep;
+    }
+    
+    section() {
+        return new SectionBuilder();
+    }
+    
+    thumbnail(url) {
+        return new ThumbnailBuilder().setURL(url);
     }
     
     async loadEvents() {

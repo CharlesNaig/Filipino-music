@@ -5,8 +5,10 @@
  */
 
 import Command from '../../structures/Command.js';
+import { ContainerBuilder, TextDisplayBuilder, MessageFlags } from 'discord.js';
 import { savePlayerState } from '../../managers/LavalinkHandler.js';
 import Schema247 from '../../schemas/247.js';
+import emojis from '../../emojis.js';
 
 export default class TwentyFourSeven extends Command {
     constructor(client, file) {
@@ -23,7 +25,7 @@ export default class TwentyFourSeven extends Command {
             permissions: {
                 dev: false,
                 client: ['SendMessages', 'ViewChannel', 'EmbedLinks'],
-                user: ['ManageGuild'], // Require Manage Guild permission
+                user: ['ManageGuild'],
             },
             slashCommand: true,
             options: [],
@@ -33,41 +35,47 @@ export default class TwentyFourSeven extends Command {
         this.file = file;
     }
 
+    _buildContainer(title, message) {
+        const container = new ContainerBuilder();
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`### ${title}\n${message}`)
+        );
+        return container;
+    }
+
     async run(ctx, args) {
-        // Check if user is in a voice channel
         const member = ctx.member;
         const voiceChannel = member.voice?.channel;
 
         if (!voiceChannel) {
             return ctx.sendMessage({
-                content: `\`❌\` You need to be in a voice channel!`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'You need to be in a voice channel!')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
-        // Get player
         const player = this.client.lavalink?.players.get(ctx.guild.id);
 
         if (!player) {
             return ctx.sendMessage({
-                content: `\`❌\` Nothing is playing right now! Start playing music first.`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'Nothing is playing right now! Start playing music first.')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
-        // Check if user is in the same voice channel
         if (player.voiceChannelId !== voiceChannel.id) {
             return ctx.sendMessage({
-                content: `\`❌\` You need to be in the same voice channel as me!`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'You need to be in the same voice channel as me!')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
         try {
-            // Toggle 24/7 mode
             const current247 = player.get('twentyFourSeven') || false;
             const new247 = !current247;
 
             player.set('twentyFourSeven', new247);
 
-            // Save to database for persistence
             await Schema247.findOneAndUpdate(
                 { _id: ctx.guild.id },
                 { 
@@ -78,10 +86,8 @@ export default class TwentyFourSeven extends Command {
                 { upsert: true }
             );
 
-            // Save player state
             await savePlayerState(player, this.client);
 
-            // Cancel any pending disconnect timeout
             if (new247) {
                 const disconnectTimeout = player.get('disconnectTimeout');
                 if (disconnectTimeout) {
@@ -96,15 +102,20 @@ export default class TwentyFourSeven extends Command {
                 }
             }
 
+            const title = new247 ? `${emojis.misc.moon} 24/7 Mode Enabled` : `${emojis.misc.sun} 24/7 Mode Disabled`;
+            const message = new247 
+                ? "I'll stay in the voice channel even when the queue is empty."
+                : "I'll leave the voice channel when the queue is empty.";
+
             return ctx.sendMessage({
-                content: new247 
-                    ? `\`🌙\` **24/7 mode enabled!** I'll stay in the voice channel even when the queue is empty.`
-                    : `\`☀️\` **24/7 mode disabled!** I'll leave the voice channel when the queue is empty.`,
+                components: [this._buildContainer(title, message)],
+                flags: MessageFlags.IsComponentsV2
             });
         } catch (error) {
             this.client.logger.error(`[247] Error: ${error.message}`);
             return ctx.sendMessage({
-                content: `\`❌\` Failed to toggle 24/7 mode: ${error.message}`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, `Failed to toggle 24/7 mode: ${error.message}`)],
+                flags: MessageFlags.IsComponentsV2
             });
         }
     }

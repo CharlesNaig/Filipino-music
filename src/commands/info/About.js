@@ -1,5 +1,6 @@
 import Command from "../../structures/Command.js"; 
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
+import { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SectionBuilder, ThumbnailBuilder, MessageFlags } from "discord.js";
+import emojis from '../../emojis.js';
 
 export default class About extends Command {
     constructor(client) {
@@ -23,24 +24,55 @@ export default class About extends Command {
     }
 
     async run(ctx, args) {
-        const embed = this.client.embed()
-            .setAuthor({ name: 'Bot Information', iconURL: this.client.user.displayAvatarURL()})
-            .setThumbnail(this.client.user.displayAvatarURL())
-            .setColor(this.client.color.default)
-            .addFields([
-                { name: '👤 Bot Name', value: this.client.user.tag, inline: true },
-                { name: '📊 Servers', value: `${this.client.guilds.cache.size}`, inline: true },
-                { name: '👥 Users', value: `${this.client.users.cache.size}`, inline: true },
-                { name: '📝 Commands', value: `${this.client.commands.size}`, inline: true },
-                { name: '🏓 Ping', value: `${Math.round(this.client.ws.ping)}ms`, inline: true },
-                { name: '⏱️ Uptime', value: `<t:${Math.floor((Date.now() - this.client.uptime) / 1000)}:R>`, inline: true },
-                { name: '💻 Node.js', value: process.version, inline: true },
-                { name: '📚 Discord.js', value: 'v14.22.1', inline: true },
-                { name: '🔧 Prefix', value: this.client.config.prefix, inline: true },
-            ])
-            .setFooter({ text: `Requested by ${ctx.author.tag}`, iconURL: ctx.author.displayAvatarURL({ dynamic: true }) })
-            .setTimestamp();
-            
-        return await ctx.sendMessage({ embeds: [embed] });
+        const container = new ContainerBuilder();
+
+        // Header section with thumbnail
+        const headerSection = new SectionBuilder()
+            .addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(`## Bot Information\n**${this.client.user.tag}**`)
+            )
+            .setThumbnailAccessory(
+                new ThumbnailBuilder().setURL(this.client.user.displayAvatarURL())
+            );
+        container.addSectionComponents(headerSection);
+
+        // Separator
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+
+        // Stats section
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                `${emojis.misc.server} **Servers:** ${this.client.guilds.cache.size}\n` +
+                `${emojis.misc.user} **Users:** ${this.client.users.cache.size}\n` +
+                `${emojis.misc.commands} **Commands:** ${this.client.commands.size}`
+            )
+        );
+
+        // Separator
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+
+        // Technical info
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                `${emojis.misc.ping} **Ping:** ${Math.round(this.client.ws.ping)}ms\n` +
+                `${emojis.misc.uptime} **Uptime:** <t:${Math.floor((Date.now() - this.client.uptime) / 1000)}:R>\n` +
+                `${emojis.misc.cpu} **Node.js:** ${process.version}\n` +
+                `${emojis.misc.about} **Discord.js:** v14.22.1\n` +
+                `${emojis.misc.settings} **Prefix:** ${this.client.config.prefix}`
+            )
+        );
+
+        // Separator
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+
+        // Footer
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`-# Requested by ${ctx.author.tag}`)
+        );
+
+        return await ctx.sendMessage({ 
+            components: [container],
+            flags: MessageFlags.IsComponentsV2
+        });
     }
 }

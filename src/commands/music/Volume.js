@@ -5,7 +5,9 @@
  */
 
 import Command from '../../structures/Command.js';
+import { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, MessageFlags } from 'discord.js';
 import { savePlayerState } from '../../managers/LavalinkHandler.js';
+import emojis from '../../emojis.js';
 
 export default class Volume extends Command {
     constructor(client, file) {
@@ -29,7 +31,7 @@ export default class Volume extends Command {
                 {
                     name: 'level',
                     description: 'Volume level (0-150)',
-                    type: 4, // Integer
+                    type: 4,
                     required: false,
                     min_value: 0,
                     max_value: 150,
@@ -41,70 +43,87 @@ export default class Volume extends Command {
         this.file = file;
     }
 
+    _buildContainer(title, message) {
+        const container = new ContainerBuilder();
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`### ${title}\n${message}`)
+        );
+        return container;
+    }
+
+    _buildVolumeContainer(volume, changed = false) {
+        const container = new ContainerBuilder();
+        const volumeBar = this._createVolumeBar(volume);
+        const emoji = volume > 100 ? emojis.player.volume : volume > 50 ? emojis.player.volumeMedium : volume > 0 ? emojis.player.volumeLow : emojis.player.volumeMute;
+        
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`### ${emoji} Volume ${changed ? 'Set' : 'Current'}`)
+        );
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`**${volume}%**\n${volumeBar}`)
+        );
+        return container;
+    }
+
     async run(ctx, args) {
-        // Check if user is in a voice channel
         const member = ctx.member;
         const voiceChannel = member.voice?.channel;
 
         if (!voiceChannel) {
             return ctx.sendMessage({
-                content: `\`❌\` You need to be in a voice channel!`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'You need to be in a voice channel!')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
-        // Get player
         const player = this.client.lavalink?.players.get(ctx.guild.id);
 
         if (!player) {
             return ctx.sendMessage({
-                content: `\`❌\` Nothing is playing right now!`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'Nothing is playing right now!')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
-        // Check if user is in the same voice channel
         if (player.voiceChannelId !== voiceChannel.id) {
             return ctx.sendMessage({
-                content: `\`❌\` You need to be in the same voice channel as me!`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'You need to be in the same voice channel as me!')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
-        // Get volume level
         const volumeArg = ctx.isInteraction 
             ? ctx.interaction.options.getInteger('level')
             : parseInt(args[0]);
 
-        // If no volume provided, show current volume
         if (volumeArg === null || volumeArg === undefined || isNaN(volumeArg)) {
-            const volumeBar = this._createVolumeBar(player.volume);
             return ctx.sendMessage({
-                content: `\`🔊\` Current volume: **${player.volume}%**\n${volumeBar}`,
+                components: [this._buildVolumeContainer(player.volume, false)],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
-        // Validate volume range
         if (volumeArg < 0 || volumeArg > 150) {
             return ctx.sendMessage({
-                content: `\`❌\` Volume must be between 0 and 150!`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'Volume must be between 0 and 150!')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
         try {
-            const oldVolume = player.volume;
             await player.setVolume(volumeArg);
-
-            // Save player state
             await savePlayerState(player, this.client);
 
-            const volumeBar = this._createVolumeBar(volumeArg);
-            const emoji = volumeArg > oldVolume ? '🔊' : volumeArg < oldVolume ? '🔉' : '🔊';
-
             return ctx.sendMessage({
-                content: `\`${emoji}\` Volume set to **${volumeArg}%**\n${volumeBar}`,
+                components: [this._buildVolumeContainer(volumeArg, true)],
+                flags: MessageFlags.IsComponentsV2
             });
         } catch (error) {
             this.client.logger.error(`[Volume] Error: ${error.message}`);
             return ctx.sendMessage({
-                content: `\`❌\` Failed to set volume: ${error.message}`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, `Failed to set volume: ${error.message}`)],
+                flags: MessageFlags.IsComponentsV2
             });
         }
     }
@@ -112,6 +131,6 @@ export default class Volume extends Command {
     _createVolumeBar(volume) {
         const filled = Math.round(volume / 10);
         const empty = 15 - filled;
-        return '`' + '▓'.repeat(filled) + '░'.repeat(empty) + '`';
+        return '`' + '▓'.repeat(Math.min(filled, 15)) + '░'.repeat(Math.max(empty, 0)) + '`';
     }
 }

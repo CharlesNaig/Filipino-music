@@ -5,8 +5,9 @@
  */
 
 import Command from '../../structures/Command.js';
-import { EmbedBuilder } from 'discord.js';
+import { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SectionBuilder, ThumbnailBuilder, MessageFlags } from 'discord.js';
 import { formatDuration, createProgressBar } from '../../managers/LavalinkHandler.js';
+import emojis from '../../emojis.js';
 
 export default class NowPlaying extends Command {
     constructor(client, file) {
@@ -34,12 +35,27 @@ export default class NowPlaying extends Command {
     }
 
     async run(ctx, args) {
+        const member = ctx.member;
+        const voiceChannel = member.voice?.channel;
+
+        if (!voiceChannel) {
+            return ctx.sendMessage({
+                content: `\`${emojis.status.error}\` You need to be in a voice channel!`,
+            });
+        }
+
         // Get player
         const player = this.client.lavalink?.players.get(ctx.guild.id);
 
         if (!player || !player.queue.current) {
             return ctx.sendMessage({
-                content: `\`❌\` Nothing is playing right now!`,
+                content: `\`${emojis.status.error}\` Nothing is playing right now!`,
+            });
+        }
+
+        if (player.voiceChannelId !== voiceChannel.id) {
+            return ctx.sendMessage({
+                content: `\`${emojis.status.error}\` You need to be in the same voice channel as me!`,
             });
         }
 
@@ -47,77 +63,78 @@ export default class NowPlaying extends Command {
         const position = player.position;
         const duration = track.info.duration;
 
-        // Build embed
-        const embed = new EmbedBuilder()
-            .setColor(this.client.config.color.default)
-            .setAuthor({
-                name: player.paused ? '⏸️ Paused' : '🎵 Now Playing',
-                iconURL: this.client.user.displayAvatarURL(),
-            })
-            .setTitle(track.info.title)
-            .setURL(track.info.uri)
-            .setThumbnail(track.info.artworkUrl || track.info.thumbnail || null);
+        const container = new ContainerBuilder();
 
-        // Add artist
-        embed.addFields({
-            name: '`👤` Artist',
-            value: track.info.author || 'Unknown',
-            inline: true,
-        });
+        // Header with thumbnail
+        const headerSection = new SectionBuilder()
+            .addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(
+                    `## ${player.paused ? `${emojis.player.pause} Paused` : `${emojis.player.music} Now Playing`}\n` +
+                    `**[${track.info.title}](${track.info.uri})**`
+                )
+            );
 
-        // Add duration/progress
+        if (track.info.artworkUrl || track.info.thumbnail) {
+            headerSection.setThumbnailAccessory(
+                new ThumbnailBuilder().setURL(track.info.artworkUrl || track.info.thumbnail)
+            );
+        }
+
+        container.addSectionComponents(headerSection);
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+
+        // Artist info
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`${emojis.misc.user} **Artist:** ${track.info.author || 'Unknown'}`)
+        );
+
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+
+        // Duration/Progress
         if (track.info.isStream) {
-            embed.addFields({
-                name: '`⏱️` Duration',
-                value: '🔴 LIVE',
-                inline: true,
-            });
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(`${emojis.misc.clock} **Duration:** ${emojis.player.live} LIVE`)
+            );
         } else {
             const progressBar = createProgressBar(position, duration, 12);
-            embed.addFields({
-                name: '`⏱️` Progress',
-                value: `${formatDuration(position)} ${progressBar} ${formatDuration(duration)}`,
-                inline: false,
-            });
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(
+                    `${emojis.misc.clock} **Progress:**\n${formatDuration(position)} ${progressBar} ${formatDuration(duration)}`
+                )
+            );
         }
 
-        // Add volume
-        embed.addFields({
-            name: '`🔊` Volume',
-            value: `${player.volume}%`,
-            inline: true,
-        });
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
 
-        // Add loop mode
+        // Additional info
+        let additionalInfo = `${emojis.player.volume} **Volume:** ${player.volume}%`;
+
         if (player.repeatMode && player.repeatMode !== 'off') {
-            embed.addFields({
-                name: '`🔁` Loop',
-                value: player.repeatMode === 'track' ? 'Track' : 'Queue',
-                inline: true,
-            });
+            additionalInfo += `\n${emojis.player.loop} **Loop:** ${player.repeatMode === 'track' ? 'Track' : 'Queue'}`;
         }
 
-        // Add queue info
         const queueLength = player.queue.tracks.length;
         if (queueLength > 0) {
-            embed.addFields({
-                name: '`📜` Queue',
-                value: `${queueLength} track${queueLength !== 1 ? 's' : ''} remaining`,
-                inline: true,
-            });
+            additionalInfo += `\n${emojis.player.queue} **Queue:** ${queueLength} track${queueLength !== 1 ? 's' : ''} remaining`;
         }
 
-        // Add requester
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(additionalInfo)
+        );
+
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+
+        // Footer
         const requester = track.requester;
-        if (requester) {
-            embed.setFooter({
-                text: `Requested by ${requester.username || 'Unknown'}`,
-                iconURL: requester.displayAvatarURL || null,
-            });
-        }
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                `-# Requested by ${requester?.username || 'Unknown'}`
+            )
+        );
 
-        embed.setTimestamp();
-
-        return ctx.sendMessage({ embeds: [embed] });
+        return ctx.sendMessage({ 
+            components: [container],
+            flags: MessageFlags.IsComponentsV2
+        });
     }
 }

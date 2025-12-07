@@ -1,5 +1,7 @@
 import Command from '../../structures/Command.js';
+import { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, MessageFlags } from 'discord.js';
 import { inspect } from 'util';
+import emojis from '../../emojis.js';
 
 export default class Eval extends Command {
     constructor(client) {
@@ -22,11 +24,32 @@ export default class Eval extends Command {
             slashCommand: false,
         });
     }
+
+    _buildContainer(title, content, isError = false) {
+        const container = new ContainerBuilder();
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`### ${title}`)
+        );
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`\`\`\`js\n${content}\n\`\`\``)
+        );
+        return container;
+    }
+
     async run(ctx, args) {
         const code = args.join(' ');
         if (!code) {
-            return ctx.sendMessage({ content: 'Please provide code to evaluate!' });
+            const container = new ContainerBuilder();
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(`### ${emojis.status.error} Error\nPlease provide code to evaluate!`)
+            );
+            return ctx.sendMessage({ 
+                components: [container],
+                flags: MessageFlags.IsComponentsV2
+            });
         }
+
         try {
             let evaled = await eval(code);
             if (typeof evaled !== 'string') {
@@ -42,26 +65,20 @@ export default class Eval extends Command {
             }
             
             // Truncate if too long
-            if (evaled.length > 1990) {
-                evaled = evaled.substring(0, 1990) + '...';
+            if (evaled.length > 1900) {
+                evaled = evaled.substring(0, 1900) + '...';
             }
             
-            const embed = this.client.embed()
-                .setColor(this.client.color.success)
-                .setTitle('✅ Eval Success')
-                .setDescription(`\`\`\`js\n${evaled}\n\`\`\``)
-                .setTimestamp();
-                
-            return ctx.sendMessage({ embeds: [embed] });
+            return ctx.sendMessage({ 
+                components: [this._buildContainer(`${emojis.status.success} Eval Success`, evaled)],
+                flags: MessageFlags.IsComponentsV2
+            });
         } catch (e) {
             console.error(e);
-            const embed = this.client.embed()
-                .setColor(this.client.color.error)
-                .setTitle('❌ Eval Error')
-                .setDescription(`\`\`\`js\n${e.message}\n\`\`\``)
-                .setTimestamp();
-                
-            return ctx.sendMessage({ embeds: [embed] });
+            return ctx.sendMessage({ 
+                components: [this._buildContainer(`${emojis.status.error} Eval Error`, e.message, true)],
+                flags: MessageFlags.IsComponentsV2
+            });
         }
     }
 }

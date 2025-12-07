@@ -5,8 +5,10 @@
  */
 
 import Command from '../../structures/Command.js';
+import { ContainerBuilder, TextDisplayBuilder, MessageFlags } from 'discord.js';
 import GuildAssignment from '../../schemas/GuildAssignment.js';
 import PlayerSchema from '../../schemas/Player.js';
+import emojis from '../../emojis.js';
 
 export default class Stop extends Command {
     constructor(client, file) {
@@ -33,53 +35,59 @@ export default class Stop extends Command {
         this.file = file;
     }
 
+    _buildContainer(title, message) {
+        const container = new ContainerBuilder();
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`### ${title}\n${message}`)
+        );
+        return container;
+    }
+
     async run(ctx, args) {
-        // Check if user is in a voice channel
         const member = ctx.member;
         const voiceChannel = member.voice?.channel;
 
         if (!voiceChannel) {
             return ctx.sendMessage({
-                content: `\`❌\` You need to be in a voice channel!`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'You need to be in a voice channel!')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
-        // Get player
         const player = this.client.lavalink?.players.get(ctx.guild.id);
 
         if (!player) {
             return ctx.sendMessage({
-                content: `\`❌\` Nothing is playing right now!`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'Nothing is playing right now!')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
-        // Check if user is in the same voice channel
         if (player.voiceChannelId !== voiceChannel.id) {
             return ctx.sendMessage({
-                content: `\`❌\` You need to be in the same voice channel as me!`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'You need to be in the same voice channel as me!')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
         try {
-            // Destroy player
             await player.destroy();
-
-            // Mark player as destroyed in database
             await PlayerSchema.markDestroyed(ctx.guild.id);
 
-            // Deactivate assignment
             const assignment = await GuildAssignment.findById(ctx.guild.id);
             if (assignment) {
                 await assignment.deactivate();
             }
 
             return ctx.sendMessage({
-                content: `\`⏹️\` Stopped playback and disconnected. Thanks for listening!`,
+                components: [this._buildContainer(`${emojis.player.stop} Stopped`, 'Stopped playback and disconnected. Thanks for listening!')],
+                flags: MessageFlags.IsComponentsV2
             });
         } catch (error) {
             this.client.logger.error(`[Stop] Error: ${error.message}`);
             return ctx.sendMessage({
-                content: `\`❌\` Failed to stop: ${error.message}`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, `Failed to stop: ${error.message}`)],
+                flags: MessageFlags.IsComponentsV2
             });
         }
     }

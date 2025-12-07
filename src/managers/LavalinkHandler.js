@@ -106,9 +106,43 @@ export async function initializeLavalink(client, config) {
         
         client.logger.ready(`[${client.botName}] Lavalink manager initialized`);
         
-        // Resume players if enabled
+        // Resume players AFTER a node connects (not immediately)
         if (config.lavalink.resuming?.enabled) {
-            await resumePlayers(client, lavalinkManager);
+            // Wait for first node to connect before resuming
+            const onNodeConnect = async (node) => {
+                // Remove listener to only run once
+                lavalinkManager.nodeManager.off('connect', onNodeConnect);
+                
+                client.logger.info(`[${client.botName}] Node ${node.id} ready, resuming players...`);
+                await resumePlayers(client, lavalinkManager);
+            };
+            
+            // Check if any node is already connected
+            // nodes can be a Map, Collection, or Array - handle all cases
+            let hasConnectedNode = false;
+            const nodesCollection = lavalinkManager.nodeManager.nodes;
+            
+            if (nodesCollection) {
+                if (typeof nodesCollection.find === 'function') {
+                    // It's an array or has find method
+                    hasConnectedNode = !!nodesCollection.find(n => n.connected);
+                } else if (typeof nodesCollection.values === 'function') {
+                    // It's a Map or Collection
+                    for (const node of nodesCollection.values()) {
+                        if (node.connected) {
+                            hasConnectedNode = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            if (hasConnectedNode) {
+                await resumePlayers(client, lavalinkManager);
+            } else {
+                // Wait for first node connection
+                lavalinkManager.nodeManager.once('connect', onNodeConnect);
+            }
         }
     };
     
@@ -192,12 +226,16 @@ async function resumePlayers(client, lavalink) {
         for (const savedPlayer of savedPlayers) {
             try {
                 const guild = client.guilds.cache.get(savedPlayer._id);
-                if (!guild) continue;
+                if (!guild) {
+                    client.logger.warn(`[${client.botName}] Guild ${savedPlayer._id} not found, skipping`);
+                    continue;
+                }
                 
                 const voiceChannel = guild.channels.cache.get(savedPlayer.voiceChannelId);
                 const textChannel = guild.channels.cache.get(savedPlayer.textChannelId);
                 
                 if (!voiceChannel || !textChannel) {
+                    client.logger.warn(`[${client.botName}] Channels not found for ${guild.name}, marking destroyed`);
                     await PlayerSchema.markDestroyed(savedPlayer._id);
                     continue;
                 }
@@ -221,31 +259,72 @@ async function resumePlayers(client, lavalink) {
                     player.setRepeatMode(savedPlayer.loopMode);
                 }
                 
-                // Restore queue
-                if (savedPlayer.currentTrack) {
-                    // Re-search for the track
-                    const result = await player.search({ 
-                        query: savedPlayer.currentTrack.info?.uri || savedPlayer.currentTrack.info?.title 
-                    });
+                // Restore 24/7 and autoplay settings
+                if (savedPlayer.twentyFourSeven) {
+                    player.set('twentyFourSeven', true);
+                }
+                if (savedPlayer.autoPlay) {
+                    player.set('autoplay', true);
+                }
+                
+                // Restore queue - load all tracks in parallel for better performance
+                if (savedPlayer.currentTrack || savedPlayer.queue.length > 0) {
+                    const tracksToLoad = [];
                     
-                    if (result.tracks.length > 0) {
-                        await player.queue.add(result.tracks[0]);
+                    // Add current track first
+                    if (savedPlayer.currentTrack) {
+                        tracksToLoad.push({
+                            query: savedPlayer.currentTrack.info?.uri || savedPlayer.currentTrack.info?.title,
+                            requester: savedPlayer.currentTrack.requester,
+                            isCurrent: true
+                        });
+                    }
+                    
+                    // Add queue tracks
+                    for (const track of savedPlayer.queue) {
+                        tracksToLoad.push({
+                            query: track.info?.uri || track.info?.title,
+                            requester: track.requester,
+                            isCurrent: false
+                        });
+                    }
+                    
+                    // Search for all tracks in parallel (batch of 5 for rate limiting)
+                    const batchSize = 5;
+                    const loadedTracks = [];
+                    
+                    for (let i = 0; i < tracksToLoad.length; i += batchSize) {
+                        const batch = tracksToLoad.slice(i, i + batchSize);
+                        const results = await Promise.allSettled(
+                            batch.map(async (trackInfo) => {
+                                const result = await player.search({ query: trackInfo.query }, trackInfo.requester);
+                                if (result.tracks.length > 0) {
+                                    return { track: result.tracks[0], isCurrent: trackInfo.isCurrent };
+                                }
+                                return null;
+                            })
+                        );
                         
-                        // Add remaining queue
-                        for (const track of savedPlayer.queue) {
-                            const trackResult = await player.search({ 
-                                query: track.info?.uri || track.info?.title 
-                            });
-                            if (trackResult.tracks.length > 0) {
-                                await player.queue.add(trackResult.tracks[0]);
+                        for (const result of results) {
+                            if (result.status === 'fulfilled' && result.value) {
+                                loadedTracks.push(result.value);
                             }
+                        }
+                    }
+                    
+                    if (loadedTracks.length > 0) {
+                        // Add all tracks to queue
+                        for (const { track } of loadedTracks) {
+                            await player.queue.add(track);
                         }
                         
                         // Start playing
                         await player.play();
                         
-                        // Seek to saved position
-                        if (savedPlayer.position > 0) {
+                        // Seek to saved position (only if we had a current track)
+                        if (savedPlayer.currentTrack && savedPlayer.position > 0) {
+                            // Small delay to ensure track is playing before seeking
+                            await new Promise(resolve => setTimeout(resolve, 500));
                             await player.seek(savedPlayer.position);
                         }
                         
@@ -254,7 +333,19 @@ async function resumePlayers(client, lavalink) {
                             await player.pause();
                         }
                         
-                        client.logger.success(`[${client.botName}] Resumed player in ${guild.name}`);
+                        client.logger.success(`[${client.botName}] Resumed player in ${guild.name} with ${loadedTracks.length} track(s)`);
+                    } else {
+                        client.logger.warn(`[${client.botName}] No tracks could be loaded for ${guild.name}`);
+                        await player.destroy();
+                        await PlayerSchema.markDestroyed(savedPlayer._id);
+                    }
+                } else {
+                    // No tracks to resume, just keep player connected if 24/7
+                    if (!savedPlayer.twentyFourSeven) {
+                        await player.destroy();
+                        await PlayerSchema.markDestroyed(savedPlayer._id);
+                    } else {
+                        client.logger.info(`[${client.botName}] 24/7 player connected in ${guild.name} (no tracks)`);
                     }
                 }
             } catch (error) {

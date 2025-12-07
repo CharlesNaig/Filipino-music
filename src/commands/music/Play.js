@@ -6,9 +6,10 @@
  */
 
 import Command from '../../structures/Command.js';
-import { ApplicationCommandOptionType, PermissionFlagsBits } from 'discord.js';
+import { ApplicationCommandOptionType, PermissionFlagsBits, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, MessageFlags } from 'discord.js';
 import GuildAssignment from '../../schemas/GuildAssignment.js';
 import { getPlayerOptions, formatDuration } from '../../managers/LavalinkHandler.js';
+import emojis from '../../emojis.js';
 
 export default class Play extends Command {
     constructor(client, file) {
@@ -42,6 +43,14 @@ export default class Play extends Command {
         this.file = file;
     }
 
+    _buildContainer(title, message) {
+        const container = new ContainerBuilder();
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`### ${title}\n${message}`)
+        );
+        return container;
+    }
+
     async run(ctx, args) {
         // Get query from slash command or message args
         const query = ctx.isInteraction 
@@ -50,7 +59,8 @@ export default class Play extends Command {
 
         if (!query) {
             return ctx.sendMessage({
-                content: `\`❌\` Please provide a song name or URL!`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'Please provide a song name or URL!')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
@@ -60,7 +70,8 @@ export default class Play extends Command {
 
         if (!voiceChannel) {
             return ctx.sendMessage({
-                content: `\`❌\` You need to be in a voice channel to play music!`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'You need to be in a voice channel to play music!')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
@@ -68,19 +79,22 @@ export default class Play extends Command {
         const permissions = voiceChannel.permissionsFor(this.client.user);
         if (!permissions.has(PermissionFlagsBits.Connect)) {
             return ctx.sendMessage({
-                content: `\`❌\` I don't have permission to join your voice channel!`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, "I don't have permission to join your voice channel!")],
+                flags: MessageFlags.IsComponentsV2
             });
         }
         if (!permissions.has(PermissionFlagsBits.Speak)) {
             return ctx.sendMessage({
-                content: `\`❌\` I don't have permission to speak in your voice channel!`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, "I don't have permission to speak in your voice channel!")],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
         // Check if Lavalink is available
         if (!this.client.lavalink) {
             return ctx.sendMessage({
-                content: `\`❌\` Music system is not available right now. Please try again later.`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'Music system is not available right now. Please try again later.')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
@@ -88,12 +102,20 @@ export default class Play extends Command {
         const connectedNodes = this.client.lavalink.nodeManager.nodes.filter(n => n.connected);
         if (!connectedNodes.size) {
             return ctx.sendMessage({
-                content: `\`❌\` No music server is available right now. Please try again in a moment.`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, 'No music server is available right now. Please try again in a moment.')],
+                flags: MessageFlags.IsComponentsV2
             });
         }
 
         // Defer reply for longer processing
-        await ctx.sendDeferMessage({ content: `\`🔍\` Searching...` });
+        const searchContainer = new ContainerBuilder();
+        searchContainer.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`### ${emojis.status.loading} Searching...\nLooking for: **${query}**`)
+        );
+        await ctx.sendDeferMessage({ 
+            components: [searchContainer],
+            flags: MessageFlags.IsComponentsV2
+        });
 
         try {
             // Get or create player
@@ -129,7 +151,8 @@ export default class Play extends Command {
                 // Check if user is in the same voice channel
                 if (player.voiceChannelId !== voiceChannel.id) {
                     return ctx.editMessage({
-                        content: `\`❌\` You need to be in the same voice channel as me!`,
+                        components: [this._buildContainer(`${emojis.status.error} Error`, 'You need to be in the same voice channel as me!')],
+                        flags: MessageFlags.IsComponentsV2
                     });
                 }
             }
@@ -139,13 +162,15 @@ export default class Play extends Command {
 
             if (result.loadType === 'error') {
                 return ctx.editMessage({
-                    content: `\`❌\` An error occurred while searching: ${result.exception?.message || 'Unknown error'}`,
+                    components: [this._buildContainer(`${emojis.status.error} Error`, `An error occurred while searching: ${result.exception?.message || 'Unknown error'}`)],
+                    flags: MessageFlags.IsComponentsV2
                 });
             }
 
             if (result.loadType === 'empty' || !result.tracks.length) {
                 return ctx.editMessage({
-                    content: `\`❌\` No results found for: **${query}**`,
+                    components: [this._buildContainer(`${emojis.status.error} Error`, `No results found for: **${query}**`)],
+                    flags: MessageFlags.IsComponentsV2
                 });
             }
 
@@ -165,8 +190,22 @@ export default class Play extends Command {
 
                 const totalDuration = result.tracks.reduce((acc, t) => acc + (t.info.duration || 0), 0);
 
+                const playlistContainer = new ContainerBuilder();
+                playlistContainer.addTextDisplayComponents(
+                    new TextDisplayBuilder().setContent(`### ${emojis.player.queue} Playlist Added`)
+                );
+                playlistContainer.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+                playlistContainer.addTextDisplayComponents(
+                    new TextDisplayBuilder().setContent(
+                        `**${playlist.name}**\n` +
+                        `${emojis.player.music} **Tracks:** ${result.tracks.length}\n` +
+                        `${emojis.misc.clock} **Duration:** ${formatDuration(totalDuration)}`
+                    )
+                );
+
                 return ctx.editMessage({
-                    content: `\`📜\` Added playlist **${playlist.name}** with **${result.tracks.length}** tracks!\n\`⏱️\` Total duration: **${formatDuration(totalDuration)}**`,
+                    components: [playlistContainer],
+                    flags: MessageFlags.IsComponentsV2
                 });
             } else {
                 // Add single track
@@ -176,20 +215,52 @@ export default class Play extends Command {
                 // Start playing if not already
                 if (!player.playing && !player.paused) {
                     await player.play();
+
+                    const nowPlayingContainer = new ContainerBuilder();
+                    nowPlayingContainer.addTextDisplayComponents(
+                        new TextDisplayBuilder().setContent(`### ${emojis.player.music} Now Playing`)
+                    );
+                    nowPlayingContainer.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+                    nowPlayingContainer.addTextDisplayComponents(
+                        new TextDisplayBuilder().setContent(
+                            `**[${track.info.title}](${track.info.uri})**\n` +
+                            `${emojis.misc.user} **Artist:** ${track.info.author}\n` +
+                            `${emojis.misc.clock} **Duration:** ${track.info.isStream ? `${emojis.player.live} LIVE` : formatDuration(track.info.duration)}`
+                        )
+                    );
+
                     return ctx.editMessage({
-                        content: `\`🎵\` Now playing: **${track.info.title}** by **${track.info.author}**`,
+                        components: [nowPlayingContainer],
+                        flags: MessageFlags.IsComponentsV2
                     });
                 } else {
                     const position = player.queue.tracks.length;
+
+                    const queuedContainer = new ContainerBuilder();
+                    queuedContainer.addTextDisplayComponents(
+                        new TextDisplayBuilder().setContent(`### ${emojis.player.queue} Added to Queue`)
+                    );
+                    queuedContainer.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+                    queuedContainer.addTextDisplayComponents(
+                        new TextDisplayBuilder().setContent(
+                            `**[${track.info.title}](${track.info.uri})**\n` +
+                            `${emojis.misc.user} **Artist:** ${track.info.author}\n` +
+                            `${emojis.misc.clock} **Duration:** ${track.info.isStream ? `${emojis.player.live} LIVE` : formatDuration(track.info.duration)}\n` +
+                            `${emojis.misc.position} **Position:** #${position}`
+                        )
+                    );
+
                     return ctx.editMessage({
-                        content: `\`📜\` Added to queue (#${position}): **${track.info.title}** by **${track.info.author}**`,
+                        components: [queuedContainer],
+                        flags: MessageFlags.IsComponentsV2
                     });
                 }
             }
         } catch (error) {
             this.client.logger.error(`[Play] Error: ${error.message}`);
             return ctx.editMessage({
-                content: `\`❌\` An error occurred: ${error.message}`,
+                components: [this._buildContainer(`${emojis.status.error} Error`, `An error occurred: ${error.message}`)],
+                flags: MessageFlags.IsComponentsV2
             });
         }
     }
