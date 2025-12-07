@@ -1,0 +1,40 @@
+{
+  "name": "discord-bot",
+  "version": "3.0.0",
+  "description": "Multi-Bot Lavalink Music Cluster for Discord",
+  "main": "src/orchestrator.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/orchestrator.js",
+    "start:single": "node src/index.js",
+    "start:sharder": "node sharder.js",
+    "dev": "nodemon src/orchestrator.js",
+    "dev:single": "nodemon src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "discord-bot",
+    "discord.js",
+    "discord.js-v14"
+  ],
+  "author": "",
+  "license": "GPL",
+  "bugs": "",
+  "homepage": "",
+  "dependencies": {
+    "discord.js": "^14.25.1",
+    "dotenv": "^17.2.3",
+    "lavalink-client": "^2.7.0",
+    "mongoose": "^8.20.1",
+    "signale": "^1.4.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
