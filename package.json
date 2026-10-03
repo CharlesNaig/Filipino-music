@@ -34,7 +34,7 @@
     "lavalink-client": "^2.7.0",
     "mongoose": "^8.20.1",
     "signale": "^1.4.0",
-    "undici": "^6.22.0"
+    "undici": "^8.0.0"
   },
   "engines": {
     "node": ">=18"
